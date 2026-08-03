@@ -9,6 +9,7 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import BookClassButton from "@/components/BookClassButton";
 
 type ClassData = {
   id: string;
@@ -162,13 +163,12 @@ export default function LiveClassList() {
               </p>
             </div>
 
-            <button
-              type="button"
-              disabled={isFull}
-              className="mt-7 w-full rounded-xl bg-sky-600 px-6 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              {isFull ? "已滿班" : "預約功能下一步開放"}
-            </button>
+            <BookClassButton
+  classId={classItem.id}
+  courseName={classItem.courseName}
+  pointsRequired={classItem.pointsRequired}
+  isFull={isFull}
+/>
           </article>
         );
       })}

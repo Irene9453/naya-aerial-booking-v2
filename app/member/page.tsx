@@ -2,10 +2,18 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { onAuthStateChanged, signOut, User } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import {
+  collection,
+  doc,
+  onSnapshot,
+  query,
+  Timestamp,
+  where,
+} from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
+import CancelBookingButton from "@/components/CancelBookingButton";
 
 type MemberData = {
   name: string;
@@ -16,52 +24,188 @@ type MemberData = {
   role: "student" | "admin";
 };
 
+type BookingData = {
+  id: string;
+  classId: string;
+  courseName: string;
+  classStartTime: Timestamp | null;
+  pointsUsed: number;
+  status: string;
+  createdAt: Timestamp | null;
+};
+
+type PointTransactionData = {
+  id: string;
+  courseName: string;
+  type: string;
+  amount: number;
+  balanceAfter: number;
+  createdAt: Timestamp | null;
+};
+
+function timestampToMilliseconds(timestamp: Timestamp | null) {
+  return timestamp ? timestamp.toMillis() : 0;
+}
+
+function formatDateTime(timestamp: Timestamp | null) {
+  if (!timestamp) {
+    return "時間尚未設定";
+  }
+
+  return timestamp.toDate().toLocaleString("zh-TW", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 export default function MemberPage() {
   const router = useRouter();
 
-  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [member, setMember] = useState<MemberData | null>(null);
+  const [bookings, setBookings] = useState<BookingData[]>([]);
+  const [pointTransactions, setPointTransactions] = useState<
+    PointTransactionData[]
+  >([]);
+
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    let unsubscribeMember: (() => void) | undefined;
+    let unsubscribeBookings: (() => void) | undefined;
+    let unsubscribePoints: (() => void) | undefined;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (!user) {
         router.replace("/login");
         return;
       }
 
-      setFirebaseUser(user);
+      // 即時會員資料與點數
+      unsubscribeMember = onSnapshot(
+        doc(db, "users", user.uid),
+        (snapshot) => {
+          if (!snapshot.exists()) {
+            setMessage("找不到會員資料，請聯繫老師。");
+            setIsLoading(false);
+            return;
+          }
 
-      try {
-        const memberReference = doc(db, "users", user.uid);
-        const memberSnapshot = await getDoc(memberReference);
+          const data = snapshot.data();
 
-        if (!memberSnapshot.exists()) {
-          setMessage("找不到會員資料，請聯繫老師協助處理。");
+          setMember({
+            name: String(data.name ?? ""),
+            email: String(data.email ?? user.email ?? ""),
+            phone: String(data.phone ?? ""),
+            experience: String(data.experience ?? ""),
+            points: Number(data.points ?? 0),
+            role: data.role === "admin" ? "admin" : "student",
+          });
+
           setIsLoading(false);
-          return;
+        },
+        (error) => {
+          console.error(error);
+          setMessage("讀取會員資料失敗。");
+          setIsLoading(false);
         }
+      );
 
-        const data = memberSnapshot.data();
+      // 只查詢目前會員自己的預約
+      const bookingsQuery = query(
+        collection(db, "bookings"),
+        where("userId", "==", user.uid)
+      );
 
-        setMember({
-          name: String(data.name ?? ""),
-          email: String(data.email ?? user.email ?? ""),
-          phone: String(data.phone ?? ""),
-          experience: String(data.experience ?? ""),
-          points: Number(data.points ?? 0),
-          role: data.role === "admin" ? "admin" : "student",
-        });
-      } catch (error) {
-        console.error(error);
-        setMessage("讀取會員資料失敗，請重新整理或稍後再試。");
-      } finally {
-        setIsLoading(false);
-      }
+      unsubscribeBookings = onSnapshot(
+        bookingsQuery,
+        (snapshot) => {
+          const nextBookings = snapshot.docs
+            .map((bookingDocument) => {
+              const data = bookingDocument.data();
+
+             return {
+  id: bookingDocument.id,
+  classId: String(data.classId ?? ""),
+  courseName: String(data.courseName ?? ""),
+                classStartTime:
+                  data.classStartTime instanceof Timestamp
+                    ? data.classStartTime
+                    : null,
+                pointsUsed: Number(data.pointsUsed ?? 0),
+                status: String(data.status ?? ""),
+                createdAt:
+                  data.createdAt instanceof Timestamp
+                    ? data.createdAt
+                    : null,
+              };
+            })
+            .sort(
+              (first, second) =>
+                timestampToMilliseconds(first.classStartTime) -
+                timestampToMilliseconds(second.classStartTime)
+            );
+
+          setBookings(nextBookings);
+        },
+        (error) => {
+          console.error(error);
+          setMessage("讀取預約紀錄失敗。");
+        }
+      );
+
+      // 只查詢目前會員自己的點數紀錄
+      const pointsQuery = query(
+        collection(db, "pointTransactions"),
+        where("userId", "==", user.uid)
+      );
+
+      unsubscribePoints = onSnapshot(
+        pointsQuery,
+        (snapshot) => {
+          const nextTransactions = snapshot.docs
+            .map((transactionDocument) => {
+              const data = transactionDocument.data();
+
+              return {
+                id: transactionDocument.id,
+                courseName: String(data.courseName ?? ""),
+                type: String(data.type ?? ""),
+                amount: Number(data.amount ?? 0),
+                balanceAfter: Number(data.balanceAfter ?? 0),
+                createdAt:
+                  data.createdAt instanceof Timestamp
+                    ? data.createdAt
+                    : null,
+              };
+            })
+            .sort(
+              (first, second) =>
+                timestampToMilliseconds(second.createdAt) -
+                timestampToMilliseconds(first.createdAt)
+            );
+
+          setPointTransactions(nextTransactions);
+        },
+        (error) => {
+          console.error(error);
+          setMessage("讀取點數紀錄失敗。");
+        }
+      );
     });
 
-    return unsubscribe;
+    return () => {
+      unsubscribeAuth();
+      unsubscribeMember?.();
+      unsubscribeBookings?.();
+      unsubscribePoints?.();
+    };
   }, [router]);
 
   async function handleLogout() {
@@ -108,6 +252,10 @@ export default function MemberPage() {
     );
   }
 
+  const activeBookings = bookings.filter(
+    (booking) => booking.status === "booked"
+  );
+
   return (
     <section className="min-h-[calc(100vh-8rem)] bg-sky-50 px-6 py-12 md:py-20">
       <div className="mx-auto max-w-5xl">
@@ -126,7 +274,7 @@ export default function MemberPage() {
           </p>
         </div>
 
-        {/* 會員資訊卡片 */}
+        {/* 點數與會員資料 */}
         <div className="mt-8 grid gap-6 md:grid-cols-3">
           <article className="rounded-3xl border border-sky-100 bg-white p-7 shadow-sm">
             <p className="text-sm font-semibold text-slate-500">
@@ -200,40 +348,103 @@ export default function MemberPage() {
             </Link>
           </div>
 
-          <div className="mt-7 rounded-2xl bg-slate-50 px-5 py-8 text-center">
-            <p className="text-slate-600">
-              目前尚未載入預約紀錄。
-            </p>
+          {activeBookings.length === 0 ? (
+            <div className="mt-7 rounded-2xl bg-slate-50 px-5 py-8 text-center">
+              <p className="text-slate-600">
+                目前沒有已預約的課程。
+              </p>
+            </div>
+          ) : (
+            <div className="mt-7 space-y-4">
+              {activeBookings.map((booking) => (
+                <div
+                  key={booking.id}
+                  className="rounded-2xl border border-sky-100 p-5"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900">
+                        {booking.courseName}
+                      </h3>
 
-            <p className="mt-2 text-sm text-slate-500">
-              下一步會將課程與預約資料連接到 Firestore。
-            </p>
-          </div>
+                      <p className="mt-2 text-slate-600">
+                        {formatDateTime(booking.classStartTime)}
+                      </p>
+                    </div>
+
+                    <span className="rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
+                      已預約
+                    </span>
+                  </div>
+
+                  <p className="mt-4 text-sm text-slate-500">
+                    使用點數：{booking.pointsUsed} 點
+                  </p>
+                  {booking.classStartTime && booking.classId && (
+  <CancelBookingButton
+    bookingId={booking.id}
+    classId={booking.classId}
+    classStartTime={booking.classStartTime}
+  />
+)}
+                </div>
+              ))}
+            </div>
+          )}
         </article>
 
-        {/* 老師入口 */}
-        {member.role === "admin" && (
-          <article className="mt-8 rounded-3xl border border-orange-100 bg-orange-50 p-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-orange-700">
-              Admin
-            </p>
+        {/* 點數紀錄 */}
+        <article className="mt-8 rounded-3xl border border-sky-100 bg-white p-7 shadow-sm md:p-9">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-600">
+            Point History
+          </p>
 
-            <h2 className="mt-2 text-2xl font-bold text-slate-900">
-              老師管理後台
-            </h2>
+          <h2 className="mt-2 text-2xl font-bold text-slate-900">
+            點數異動紀錄
+          </h2>
 
-            <p className="mt-3 text-slate-600">
-              你的帳號具有管理員權限。
-            </p>
+          {pointTransactions.length === 0 ? (
+            <div className="mt-7 rounded-2xl bg-slate-50 px-5 py-8 text-center">
+              <p className="text-slate-600">
+                目前沒有點數異動紀錄。
+              </p>
+            </div>
+          ) : (
+            <div className="mt-7 divide-y divide-slate-100">
+              {pointTransactions.map((transaction) => (
+                <div
+                  key={transaction.id}
+                  className="flex flex-wrap items-center justify-between gap-4 py-5"
+                >
+                  <div>
+                    <p className="font-semibold text-slate-900">
+                      {transaction.courseName || "點數調整"}
+                    </p>
 
-            <Link
-              href="/admin"
-              className="mt-5 inline-block rounded-xl bg-orange-600 px-6 py-3 font-semibold text-white"
-            >
-              進入管理後台
-            </Link>
-          </article>
-        )}
+                    <p className="mt-1 text-sm text-slate-500">
+                      {formatDateTime(transaction.createdAt)}
+                    </p>
+
+                    <p className="mt-1 text-xs text-slate-400">
+                      異動後餘額：{transaction.balanceAfter} 點
+                    </p>
+                  </div>
+
+                  <p
+                    className={`text-xl font-bold ${
+                      transaction.amount >= 0
+                        ? "text-emerald-600"
+                        : "text-orange-600"
+                    }`}
+                  >
+                    {transaction.amount >= 0 ? "+" : ""}
+                    {transaction.amount} 點
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </article>
 
         {message && (
           <p className="mt-6 text-center text-sm text-red-600">
@@ -250,10 +461,6 @@ export default function MemberPage() {
             登出
           </button>
         </div>
-
-        <p className="mt-4 text-center text-xs text-slate-400">
-          登入帳號：{firebaseUser?.email}
-        </p>
       </div>
     </section>
   );
