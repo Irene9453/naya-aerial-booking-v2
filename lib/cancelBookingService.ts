@@ -48,19 +48,25 @@ export async function cancelBooking({
   const classRef = doc(db, "classes", classId);
   const bookingRef = doc(db, "bookings", bookingId);
 
-  const refundTransactionRef = doc(
-    db,
-    "pointTransactions",
-    `${bookingId}_refund`
-  );
+ const operationId = `${Date.now()}_${crypto.randomUUID()}`;
+
+const refundTransactionRef = doc(
+  db,
+  "pointTransactions",
+  `${bookingId}_refund_${operationId}`
+);
+
+const notificationRef = doc(
+  db,
+  "notifications",
+  `${bookingId}_cancelled_${operationId}`
+);
 
   return runTransaction(db, async (transaction) => {
     const userSnapshot = await transaction.get(userRef);
     const classSnapshot = await transaction.get(classRef);
     const bookingSnapshot = await transaction.get(bookingRef);
-    const refundSnapshot = await transaction.get(
-      refundTransactionRef
-    );
+
 
     if (!userSnapshot.exists()) {
       throw new Error("找不到會員資料");
@@ -86,9 +92,6 @@ export async function cancelBooking({
       throw new Error("這筆預約已取消或無法取消");
     }
 
-    if (refundSnapshot.exists()) {
-      throw new Error("此預約已經退回點數");
-    }
 
     if (!(classData.startTime instanceof Timestamp)) {
       throw new Error("課程時間設定不正確");
@@ -143,6 +146,19 @@ export async function cancelBooking({
       balanceAfter: newPointBalance,
       createdAt: serverTimestamp(),
     });
+
+    transaction.set(notificationRef, {
+  userId,
+  type: "cancellation",
+  title: "預約已取消",
+  body: `已取消 ${String(bookingData.courseName ?? "")}，並退回 ${pointsUsed} 點`,
+  classId,
+  bookingId,
+  courseName: String(bookingData.courseName ?? ""),
+  classStartTime: classData.startTime,
+  isRead: false,
+  createdAt: serverTimestamp(),
+});
 
     return {
       refundedPoints: pointsUsed,

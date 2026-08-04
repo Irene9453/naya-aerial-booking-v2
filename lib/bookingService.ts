@@ -22,11 +22,19 @@ export async function bookClass({
   const bookingId = `${userId}_${classId}`;
   const bookingRef = doc(db, "bookings", bookingId);
 
-  const pointTransactionRef = doc(
-    db,
-    "pointTransactions",
-    bookingId
-  );
+  const operationId = Date.now().toString();
+
+const pointTransactionRef = doc(
+  db,
+  "pointTransactions",
+  `${bookingId}_booking_${operationId}`
+);
+
+const notificationRef = doc(
+  db,
+  "notifications",
+  `${bookingId}_booked_${operationId}`
+);
 
   return runTransaction(db, async (transaction) => {
     // Transaction 規定先讀取，再進行寫入
@@ -43,14 +51,16 @@ export async function bookClass({
     }
 
     if (bookingSnapshot.exists()) {
-      const existingBooking = bookingSnapshot.data();
+  const existingBooking = bookingSnapshot.data();
 
-      if (existingBooking.status === "booked") {
-        throw new Error("你已經預約過這堂課");
-      }
+  if (existingBooking.status === "booked") {
+    throw new Error("你已經預約過這堂課");
+  }
 
-      throw new Error("這堂課已有預約紀錄");
-    }
+  if (existingBooking.status !== "cancelled") {
+    throw new Error("這堂課已有無法重新預約的紀錄");
+  }
+}
 
     const userData = userSnapshot.data();
     const classData = classSnapshot.data();
@@ -99,15 +109,16 @@ export async function bookClass({
 
     // 建立預約紀錄
     transaction.set(bookingRef, {
-      userId,
-      classId,
-      courseName: String(classData.courseName ?? ""),
-      classStartTime: classData.startTime,
-      pointsUsed: pointsRequired,
-      status: "booked",
-      createdAt: serverTimestamp(),
-      cancelledAt: null,
-    });
+  userId,
+  classId,
+  courseName: String(classData.courseName ?? ""),
+  classStartTime: classData.startTime,
+  pointsUsed: pointsRequired,
+  status: "booked",
+  createdAt: serverTimestamp(),
+  cancelledAt: null,
+  pointsRefunded: 0,
+});
 
     // 建立點數異動紀錄
     transaction.set(pointTransactionRef, {
@@ -120,6 +131,19 @@ export async function bookClass({
       balanceAfter: remainingPoints,
       createdAt: serverTimestamp(),
     });
+
+    transaction.set(notificationRef, {
+  userId,
+  type: "booking",
+  title: "預約成功",
+  body: `你已成功預約 ${String(classData.courseName ?? "")}`,
+  classId,
+  bookingId,
+  courseName: String(classData.courseName ?? ""),
+  classStartTime: classData.startTime,
+  isRead: false,
+  createdAt: serverTimestamp(),
+});
 
     return {
       bookingId,

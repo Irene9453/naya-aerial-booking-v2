@@ -14,6 +14,7 @@ import {
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import CancelBookingButton from "@/components/CancelBookingButton";
+import NotificationCenter from "@/components/NotificationCenter";
 
 type MemberData = {
   name: string;
@@ -326,6 +327,8 @@ export default function MemberPage() {
             </dl>
           </article>
         </div>
+        
+<NotificationCenter />
 
         {/* 我的預約 */}
         <article className="mt-8 rounded-3xl border border-sky-100 bg-white p-7 shadow-sm md:p-9">
@@ -451,7 +454,28 @@ export default function MemberPage() {
             {message}
           </p>
         )}
+{member.role === "admin" && (
+  <div className="mt-8 rounded-3xl border border-orange-100 bg-orange-50 p-7">
+    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-orange-700">
+      Admin
+    </p>
 
+    <h2 className="mt-2 text-2xl font-bold text-slate-900">
+      老師管理後台
+    </h2>
+
+    <p className="mt-3 text-slate-600">
+      管理學生點數、課程與預約名單。
+    </p>
+
+    <Link
+      href="/admin"
+      className="mt-5 inline-block rounded-xl bg-orange-600 px-6 py-3 font-semibold text-white"
+    >
+      進入管理後台
+    </Link>
+  </div>
+)}
         <div className="mt-8 text-center">
           <button
             type="button"
