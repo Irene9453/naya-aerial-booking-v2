@@ -15,6 +15,10 @@ import { auth, db } from "@/lib/firebase";
 import AdminPointButton from "@/components/AdminPointButton";
 import AdminCreateClass from "@/components/AdminCreateClass";
 import AdminClassRoster from "@/components/AdminClassRoster";
+import AdminTodayClasses from "@/components/AdminTodayClasses";
+import AdminPackageManager from "@/components/AdminPackageManager";
+import StudentManager from "@/components/StudentManager";
+import ClassManager from "@/components/ClassManager";
 
 type StudentData = {
   id: string;
@@ -233,150 +237,7 @@ export default function AdminPage() {
           </article>
         </div>
 
-        <article className="mt-8 rounded-3xl bg-white p-7 shadow-sm md:p-9">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-600">
-                Students
-              </p>
-
-              <h2 className="mt-2 text-2xl font-bold text-slate-900">
-                會員與點數
-              </h2>
-            </div>
-          </div>
-
-          <div className="mt-7 overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-  <thead>
-    <tr className="border-b border-slate-200 text-slate-500">
-      <th className="px-4 py-3 font-semibold">姓名</th>
-      <th className="px-4 py-3 font-semibold">Email</th>
-      <th className="px-4 py-3 font-semibold">電話</th>
-      <th className="px-4 py-3 font-semibold">經驗</th>
-      <th className="px-4 py-3 text-right font-semibold">
-        點數
-      </th>
-      <th className="px-4 py-3 text-right font-semibold">
-        操作
-      </th>
-    </tr>
-  </thead>
-
-  <tbody>
-    {students
-      .filter((student) => student.role === "student")
-      .map((student) => (
-        <tr
-          key={student.id}
-          className="border-b border-slate-100"
-        >
-          <td className="whitespace-nowrap px-4 py-4 font-semibold text-slate-900">
-            {student.name}
-          </td>
-
-          <td className="px-4 py-4 text-slate-600">
-            {student.email}
-          </td>
-
-          <td className="whitespace-nowrap px-4 py-4 text-slate-600">
-            {student.phone}
-          </td>
-
-          <td className="whitespace-nowrap px-4 py-4 text-slate-600">
-            {student.experience}
-          </td>
-
-          <td className="px-4 py-4 text-right text-lg font-bold text-sky-600">
-            {student.points}
-          </td>
-
-          <td className="px-4 py-4 text-right">
-            <AdminPointButton
-              studentId={student.id}
-              studentName={student.name}
-            />
-          </td>
-        </tr>
-      ))}
-  </tbody>
-</table>
-          </div>
-        </article>
-
-        <article className="mt-8 rounded-3xl bg-white p-7 shadow-sm md:p-9">
-  <div className="flex flex-wrap items-center justify-between gap-4">
-    <div>
-      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-600">
-        Classes
-      </p>
-
-      <h2 className="mt-2 text-2xl font-bold text-slate-900">
-        課程管理
-      </h2>
-    </div>
-
-    <div className="flex flex-wrap gap-3">
-      <AdminCreateClass />
-
-      <Link
-        href="/booking"
-        className="rounded-xl border border-sky-600 px-5 py-3 font-semibold text-sky-700"
-      >
-        查看學生課表
-      </Link>
-    </div>
-  </div>
-
-  <div className="mt-7 space-y-4">
-    {classes.length === 0 ? (
-      <div className="rounded-2xl bg-slate-50 px-5 py-8 text-center">
-        <p className="text-slate-600">目前尚未建立課程。</p>
-      </div>
-    ) : (
-      classes.map((classItem) => (
-        <div
-          key={classItem.id}
-          className="flex flex-wrap items-center justify-between gap-5 rounded-2xl border border-slate-200 p-5"
-        >
-          <div>
-            <h3 className="text-lg font-bold text-slate-900">
-              {classItem.courseName}
-            </h3>
-
-            <p className="mt-2 text-sm text-slate-600">
-              {formatDateTime(classItem.startTime)}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-3 text-sm">
-            <span className="rounded-full bg-sky-50 px-4 py-2 font-semibold text-sky-700">
-              {classItem.pointsRequired} 點
-            </span>
-
-            <span className="rounded-full bg-slate-100 px-4 py-2 font-semibold text-slate-700">
-              {classItem.bookedCount} / {classItem.capacity} 人
-            </span>
-
-            <span
-              className={`rounded-full px-4 py-2 font-semibold ${
-                classItem.status === "open"
-                  ? "bg-emerald-50 text-emerald-700"
-                  : "bg-slate-100 text-slate-600"
-              }`}
-            >
-              {classItem.status === "open" ? "開放中" : classItem.status}
-            </span>
-            <AdminClassRoster
-    classId={classItem.id}
-    courseName={classItem.courseName}
-  />
-          </div>
-        </div>
-      ))
-    )}
-  </div>
-</article>
+       <AdminPackageManager />
 
         {message && (
           <p className="mt-6 text-center text-sm text-red-600">
