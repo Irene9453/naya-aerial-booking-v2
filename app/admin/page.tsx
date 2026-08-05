@@ -12,9 +12,6 @@ import {
 } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
-import AdminPointButton from "@/components/AdminPointButton";
-import AdminCreateClass from "@/components/AdminCreateClass";
-import AdminClassRoster from "@/components/AdminClassRoster";
 import AdminTodayClasses from "@/components/AdminTodayClasses";
 import AdminPackageManager from "@/components/AdminPackageManager";
 import StudentManager from "@/components/StudentManager";
@@ -206,44 +203,56 @@ export default function AdminPage() {
         </div>
 
         <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          <article className="rounded-3xl bg-white p-7 shadow-sm">
-            <p className="text-sm font-semibold text-slate-500">
-              會員人數
-            </p>
+  <article className="rounded-3xl bg-white p-7 shadow-sm">
+    <p className="text-sm font-semibold text-slate-500">
+      會員人數
+    </p>
 
-            <p className="mt-3 text-4xl font-bold text-sky-600">
-              {students.filter((student) => student.role === "student").length}
-            </p>
-          </article>
+    <p className="mt-3 text-4xl font-bold text-sky-600">
+      {students.filter((student) => student.role === "student").length}
+    </p>
+  </article>
 
-          <article className="rounded-3xl bg-white p-7 shadow-sm">
-            <p className="text-sm font-semibold text-slate-500">
-              課程數量
-            </p>
+  <article className="rounded-3xl bg-white p-7 shadow-sm">
+    <p className="text-sm font-semibold text-slate-500">
+      課程數量
+    </p>
 
-            <p className="mt-3 text-4xl font-bold text-sky-600">
-              {classes.length}
-            </p>
-          </article>
+    <p className="mt-3 text-4xl font-bold text-sky-600">
+      {classes.length}
+    </p>
+  </article>
 
-          <article className="rounded-3xl bg-white p-7 shadow-sm">
-            <p className="text-sm font-semibold text-slate-500">
-              開放中課程
-            </p>
+  <article className="rounded-3xl bg-white p-7 shadow-sm">
+    <p className="text-sm font-semibold text-slate-500">
+      開放中課程
+    </p>
 
-            <p className="mt-3 text-4xl font-bold text-sky-600">
-              {classes.filter((classItem) => classItem.status === "open").length}
-            </p>
-          </article>
-        </div>
+    <p className="mt-3 text-4xl font-bold text-sky-600">
+      {classes.filter(
+        (classItem) => classItem.status === "open"
+      ).length}
+    </p>
+  </article>
+</div>
 
-       <AdminPackageManager />
+{/* 今日課程 */}
+<AdminTodayClasses classes={classes} />
 
-        {message && (
-          <p className="mt-6 text-center text-sm text-red-600">
-            {message}
-          </p>
-        )}
+{/* 會員管理 */}
+<StudentManager students={students} />
+
+{/* 課程管理 */}
+<ClassManager classes={classes} />
+
+{/* 課卡管理 */}
+<AdminPackageManager />
+
+{message && (
+  <p className="mt-6 text-center text-sm text-red-600">
+    {message}
+  </p>
+)}
 
         <div className="mt-8 text-center">
           <Link
