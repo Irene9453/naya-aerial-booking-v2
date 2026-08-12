@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import CancelBookingButton from "@/components/CancelBookingButton";
 import NotificationCenter from "@/components/NotificationCenter";
+import SpecialLeaveBalance from "@/components/SpecialLeaveBalance";
 
 type MemberData = {
   name: string;
@@ -70,6 +71,7 @@ export default function MemberPage() {
 
   const [member, setMember] = useState<MemberData | null>(null);
   const [bookings, setBookings] = useState<BookingData[]>([]);
+  const [userId, setUserId] = useState("");
   const [pointTransactions, setPointTransactions] = useState<
     PointTransactionData[]
   >([]);
@@ -87,7 +89,7 @@ export default function MemberPage() {
         router.replace("/login");
         return;
       }
-
+ setUserId(user.uid);
       // 即時會員資料與點數
       unsubscribeMember = onSnapshot(
         doc(db, "users", user.uid),
@@ -285,7 +287,22 @@ export default function MemberPage() {
             <p className="mt-3 text-5xl font-bold text-sky-600">
               {member.points}
             </p>
+<div className="mt-6">
+  <Link
+    href="/buy-packages"
+    className="inline-block rounded-xl bg-sky-600 px-6 py-3 font-semibold text-white transition hover:bg-sky-700"
+  >
+    購買課卡
+  </Link>
 
+  <Link
+  href="/rewards"
+  className="inline-block rounded-xl border border-sky-300 bg-white px-6 py-3 font-semibold text-sky-700 transition hover:bg-sky-50"
+>
+  我的紅利與優惠券
+</Link>
+
+</div>
             <p className="mt-2 text-sm text-slate-500">
               可用於預約課程
             </p>
@@ -327,7 +344,12 @@ export default function MemberPage() {
             </dl>
           </article>
         </div>
-        
+              {/* 特殊請假額度 */}
+        {userId && (
+          <div className="mt-8">
+            <SpecialLeaveBalance userId={userId} />
+          </div>
+        )}
 <NotificationCenter />
 
         {/* 我的預約 */}

@@ -14,7 +14,7 @@ export default function BookingPage() {
         </h1>
 
         <p className="mx-auto mt-5 max-w-2xl leading-7 text-slate-600">
-          查看即時課程名額與所需點數，選擇適合自己的課程。
+            查看最新課程時間與所需點數，登入會員後即可查看名額並進行預約。
         </p>
       </section>
 
@@ -30,8 +30,8 @@ export default function BookingPage() {
           </h2>
 
           <p className="mx-auto mt-4 max-w-xl leading-7 text-slate-600">
-            課程名額會即時更新。
-          </p>
+  登入會員後可查看即時名額並進行預約。
+</p>
         </div>
 
         <LiveClassList />

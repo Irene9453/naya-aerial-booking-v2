@@ -6,24 +6,106 @@ import { signInWithEmailAndPassword } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
 
+function getSafeRedirectPath() {
+  if (typeof window === "undefined") {
+    return "/member";
+  }
+
+  const params = new URLSearchParams(
+    window.location.search
+  );
+
+  const redirect =
+    params.get("redirect");
+
+  // 沒有指定 redirect，就回會員中心
+  if (!redirect) {
+    return "/member";
+  }
+
+  // 只允許站內路徑，避免跳到外部網站
+  if (
+    !redirect.startsWith("/") ||
+    redirect.startsWith("//")
+  ) {
+    return "/member";
+  }
+
+  return redirect;
+}
+
 export default function LoginPage() {
+  
   const router = useRouter();
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [email, setEmail] =
+    useState("");
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  const [password, setPassword] =
+    useState("");
+
+  const [message, setMessage] =
+    useState("");
+
+  const [
+    isSubmitting,
+    setIsSubmitting,
+  ] = useState(false);
+function getSafeRedirectPath() {
+  if (typeof window === "undefined") {
+    return "/member";
+  }
+
+  const params = new URLSearchParams(
+    window.location.search
+  );
+
+  const redirect = params.get("redirect");
+
+  if (!redirect) {
+    return "/member";
+  }
+
+  if (
+    !redirect.startsWith("/") ||
+    redirect.startsWith("//")
+  ) {
+    return "/member";
+  }
+
+  return redirect;
+}
+  async function handleSubmit(
+    event: FormEvent<HTMLFormElement>
+  ) {
     event.preventDefault();
+
     setMessage("");
     setIsSubmitting(true);
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
 
-      setMessage("登入成功，正在前往會員中心……");
-      router.push("/member");
+      const redirectPath =
+        getSafeRedirectPath();
+
+      if (
+        redirectPath === "/booking"
+      ) {
+        setMessage(
+          "登入成功，正在返回課程預約……"
+        );
+      } else {
+        setMessage(
+          "登入成功，正在前往會員中心……"
+        );
+      }
+
+      router.replace(redirectPath);
     } catch (error: unknown) {
       console.error(error);
 
@@ -31,21 +113,47 @@ export default function LoginPage() {
         typeof error === "object" &&
         error !== null &&
         "code" in error
-          ? String(error.code)
+          ? String(
+              (
+                error as {
+                  code?: string;
+                }
+              ).code ?? ""
+            )
           : "";
 
       if (
-        errorCode === "auth/invalid-credential" ||
-        errorCode === "auth/wrong-password" ||
-        errorCode === "auth/user-not-found"
+        errorCode ===
+          "auth/invalid-credential" ||
+        errorCode ===
+          "auth/wrong-password" ||
+        errorCode ===
+          "auth/user-not-found"
       ) {
-        setMessage("Email 或密碼不正確。");
-      } else if (errorCode === "auth/invalid-email") {
-        setMessage("Email 格式不正確。");
-      } else if (errorCode === "auth/too-many-requests") {
-        setMessage("嘗試次數過多，請稍後再試。");
+        setMessage(
+          "Email 或密碼不正確。"
+        );
+      } else if (
+        errorCode ===
+        "auth/invalid-email"
+      ) {
+        setMessage(
+          "Email 格式不正確。"
+        );
+      } else if (
+        errorCode ===
+        "auth/too-many-requests"
+      ) {
+        setMessage(
+          "嘗試次數過多，請稍後再試。"
+        );
       } else {
-        setMessage(`登入失敗：${errorCode || "未知錯誤"}`);
+        setMessage(
+          `登入失敗：${
+            errorCode ||
+            "未知錯誤"
+          }`
+        );
       }
     } finally {
       setIsSubmitting(false);
@@ -87,7 +195,11 @@ export default function LoginPage() {
               autoComplete="email"
               required
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={(event) =>
+                setEmail(
+                  event.target.value
+                )
+              }
               placeholder="請輸入 Email"
               className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
             />
@@ -107,10 +219,22 @@ export default function LoginPage() {
               autoComplete="current-password"
               required
               value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              onChange={(event) =>
+                setPassword(
+                  event.target.value
+                )
+              }
               placeholder="請輸入密碼"
               className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
             />
+            <div className="mt-3 text-right">
+  <Link
+    href="/forgot-password"
+    className="text-sm font-semibold text-sky-700 transition hover:text-sky-800"
+  >
+    忘記密碼？
+  </Link>
+</div>
           </div>
 
           <button
@@ -118,7 +242,9 @@ export default function LoginPage() {
             disabled={isSubmitting}
             className="mt-8 w-full rounded-xl bg-sky-600 px-6 py-3.5 font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isSubmitting ? "登入中……" : "登入"}
+            {isSubmitting
+              ? "登入中……"
+              : "登入"}
           </button>
 
           {message && (
@@ -130,11 +256,18 @@ export default function LoginPage() {
           <p className="mt-7 text-center text-sm text-slate-600">
             還沒有會員帳號？
             <Link
-              href="/register"
-              className="ml-2 font-semibold text-sky-700 hover:text-sky-800"
-            >
-              前往註冊
-            </Link>
+  href={
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("redirect")
+      ? `/register?redirect=${encodeURIComponent(
+          new URLSearchParams(window.location.search).get("redirect")!
+        )}`
+      : "/register"
+  }
+  className="ml-2 font-semibold text-sky-700 hover:text-sky-800"
+>
+  前往註冊
+</Link>
           </p>
         </form>
       </div>

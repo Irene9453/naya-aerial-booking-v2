@@ -92,10 +92,18 @@ const notificationRef = doc(
     }
 
     if (!(classData.startTime instanceof Timestamp)) {
-      throw new Error("課程時間設定不正確");
-    }
+  throw new Error("課程時間設定不正確");
+}
 
-    const remainingPoints = currentPoints - pointsRequired;
+// 已開始或已結束的課程不可預約
+const now = new Date();
+const classStartTime = classData.startTime.toDate();
+
+if (classStartTime.getTime() <= now.getTime()) {
+  throw new Error("此課程已開始，無法預約");
+}
+
+const remainingPoints = currentPoints - pointsRequired;
 
     // 扣除會員點數
     transaction.update(userRef, {

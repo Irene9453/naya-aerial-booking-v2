@@ -16,14 +16,27 @@ import AdminTodayClasses from "@/components/AdminTodayClasses";
 import AdminPackageManager from "@/components/AdminPackageManager";
 import StudentManager from "@/components/StudentManager";
 import ClassManager from "@/components/ClassManager";
+import AdminRevenueSummary from "@/components/AdminRevenueSummary";
+import AdminInitializeCoupons from "@/components/AdminInitializeCoupons";
+import AdminPurchaseRequests from "@/components/AdminPurchaseRequests";
+import AdminSpecialLeaveManager from "@/components/AdminSpecialLeaveManager";
 
 type StudentData = {
   id: string;
   name: string;
+  nickname: string;
   email: string;
   phone: string;
+  phoneNormalized: string;
   experience: string;
+
   points: number;
+  rewardPoints: number;
+
+  birthdayYear: number;
+  birthdayMonth: number;
+  birthdayDay: number;
+
   role: string;
 };
 
@@ -35,6 +48,7 @@ type ClassData = {
   capacity: number;
   bookedCount: number;
   status: string;
+  allowMonthlyBooking: boolean;
 };
 
 function formatDateTime(timestamp: Timestamp | null) {
@@ -99,14 +113,48 @@ export default function AdminPage() {
                   const data = studentDocument.data();
 
                   return {
-                    id: studentDocument.id,
-                    name: String(data.name ?? ""),
-                    email: String(data.email ?? ""),
-                    phone: String(data.phone ?? ""),
-                    experience: String(data.experience ?? ""),
-                    points: Number(data.points ?? 0),
-                    role: String(data.role ?? "student"),
-                  };
+  id: studentDocument.id,
+
+  name: String(data.name ?? ""),
+  nickname: String(data.nickname ?? ""),
+  email: String(data.email ?? ""),
+
+  phone: String(data.phone ?? ""),
+
+  phoneNormalized: String(
+    data.phoneNormalized ??
+      data.phone ??
+      ""
+  ),
+
+  experience: String(
+    data.experience ?? ""
+  ),
+
+  points: Number(
+    data.points ?? 0
+  ),
+
+  rewardPoints: Number(
+    data.rewardPoints ?? 0
+  ),
+
+  birthdayYear: Number(
+    data.birthdayYear ?? 0
+  ),
+
+  birthdayMonth: Number(
+    data.birthdayMonth ?? 0
+  ),
+
+  birthdayDay: Number(
+    data.birthdayDay ?? 0
+  ),
+
+  role: String(
+    data.role ?? "student"
+  ),
+};
                 })
                 .sort((a, b) =>
                   a.name.localeCompare(b.name, "zh-Hant")
@@ -141,7 +189,10 @@ export default function AdminPage() {
                     pointsRequired: Number(data.pointsRequired ?? 0),
                     capacity: Number(data.capacity ?? 0),
                     bookedCount: Number(data.bookedCount ?? 0),
-                    status: String(data.status ?? ""),
+status: String(data.status ?? ""),
+allowMonthlyBooking: Boolean(
+  data.allowMonthlyBooking ?? false
+),
                   };
                 })
                 .sort((a, b) => {
@@ -239,6 +290,25 @@ export default function AdminPage() {
 {/* 今日課程 */}
 <AdminTodayClasses classes={classes} />
 
+{/* 收入統計 */}
+<AdminRevenueSummary />
+
+{/* 購買申請 */}
+<AdminPurchaseRequests />
+<AdminTodayClasses classes={classes} />
+
+<AdminRevenueSummary />
+
+<AdminSpecialLeaveManager />
+
+<StudentManager students={students} />
+
+<ClassManager classes={classes} />
+
+<AdminPackageManager />
+
+<AdminInitializeCoupons />
+
 {/* 會員管理 */}
 <StudentManager students={students} />
 
@@ -247,6 +317,9 @@ export default function AdminPage() {
 
 {/* 課卡管理 */}
 <AdminPackageManager />
+
+{/* 優惠管理 */}
+<AdminInitializeCoupons />
 
 {message && (
   <p className="mt-6 text-center text-sm text-red-600">
