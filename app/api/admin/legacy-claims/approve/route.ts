@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 
@@ -132,8 +132,7 @@ export async function POST(request: NextRequest) {
           Number(legacy.birthdayMonth) ||
         Number(claim.birthdayDay) !==
           Number(legacy.birthdayDay) ||
-        (claimYear > 0 &&
-          claimYear !== legacyYear)
+        claimYear !== legacyYear
       ) {
         throw new Error("IDENTITY_MISMATCH");
       }

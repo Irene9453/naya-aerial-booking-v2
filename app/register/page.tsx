@@ -149,7 +149,7 @@ export default function RegisterPage() {
       if (memberType === "legacy") {
         try {
           const token = await credential.user.getIdToken();
-          const response = await fetch("/api/legacy-members/claim", {
+          const response = await fetch("/api/admin/legacy-members/claim", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

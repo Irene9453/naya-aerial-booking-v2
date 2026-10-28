@@ -24,6 +24,7 @@ import CancelBookingButton from "@/components/CancelBookingButton";
 import NotificationCenter from "@/components/NotificationCenter";
 import SpecialLeaveBalance from "@/components/SpecialLeaveBalance";
 import MemberAerialJourney from "@/components/MemberAerialJourney";
+import LegacyMemberClaim from "@/components/LegacyMemberClaim";
 
 type MemberData = {
   name: string;
@@ -181,9 +182,9 @@ setMember({
   role: data.role === "admin" ? "admin" : "student",
 
   legacyStatus:
-    data.legacyStatus === "claimed"
+    data.legacyMemberId || data.legacyClaimedAt || data.legacyStatus === "claimed"
       ? "claimed"
-      : data.legacyStatus === "new"
+      : data.isNewStudent === true || data.legacyStatus === "new"
       ? "new"
       : "eligible",
 });
@@ -540,7 +541,17 @@ const historyBookings = bookings
             </dl>
           </article>
         </div>
-        {/* 我的空中旅程 */}
+        {/* 舊會員點數認領 */}
+{member.legacyStatus === "claimed" ? (
+  <div className="mt-8 rounded-2xl border border-green-200 bg-green-50 p-5 text-green-800">
+    ✓ 舊會員點數已成功移轉
+  </div>
+) : member.legacyStatus === "eligible" ? (
+  <div className="mt-8">
+    <LegacyMemberClaim />
+  </div>
+) : null}
+{/* 我的空中旅程 */}
 <MemberAerialJourney studentName={member.name} />
 
               {/* 特殊請假額度 */}

@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
 
     if (
       !Number.isInteger(birthdayYear) ||
-      birthdayYear < 0 ||
+      birthdayYear < 1900 ||
       birthdayYear > new Date().getFullYear()
     ) {
       return errorResponse("生日年份格式不正確。", 400);
@@ -89,10 +89,47 @@ export async function POST(request: NextRequest) {
       }
 
       if (status === "rejected") {
-        return errorResponse(
-          "先前的認領申請未通過，請聯繫老師確認。",
-          409
-        );
+        const result = await adminDb.runTransaction(async (tx) => {
+          const latest = await tx.get(claimRef);
+
+          if (!latest.exists || latest.data()?.status !== "rejected") {
+            return "changed";
+          }
+
+          const previous = latest.data() ?? {};
+          const historyRef = claimRef.collection("history").doc();
+
+          tx.create(historyRef, {
+            ...previous,
+            archivedAt: FieldValue.serverTimestamp(),
+          });
+
+          tx.update(claimRef, {
+            phone,
+            birthdayYear,
+            birthdayMonth,
+            birthdayDay,
+            status: "pending",
+            reviewedBy: FieldValue.delete(),
+            reviewedAt: FieldValue.delete(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+
+          return "updated";
+        });
+
+        if (result !== "updated") {
+          return errorResponse(
+            "申請狀態已變更，請重新整理後再試。",
+            409
+          );
+        }
+
+        return NextResponse.json({
+          success: true,
+          status: "pending",
+          message: "重新認領申請已送出，請等待老師審核。",
+        });
       }
 
       return errorResponse("認領申請狀態異常，請聯繫老師。", 409);

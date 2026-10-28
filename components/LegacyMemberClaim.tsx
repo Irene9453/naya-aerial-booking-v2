@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { auth, db } from "@/lib/firebase";
 import {
   doc,
@@ -31,6 +31,63 @@ export default function LegacyMemberClaim() {
 
   const [isSuccess, setIsSuccess] =
     useState(false);
+
+  const [claimStatus, setClaimStatus] =
+    useState<"loading" | "none" | "pending" | "approved" | "rejected" | "error">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadClaimStatus() {
+      try {
+        const user = auth.currentUser;
+
+        if (!user) {
+          if (!cancelled) setClaimStatus("error");
+          return;
+        }
+
+        const token = await user.getIdToken();
+
+        const response = await fetch("/api/legacy-members/status", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          throw new Error("無法取得認領狀態");
+        }
+
+        const data = await response.json();
+
+        if (!cancelled) {
+          const status = data.status;
+
+          if (
+            status === "none" ||
+            status === "pending" ||
+            status === "approved" ||
+            status === "rejected"
+          ) {
+            setClaimStatus(status);
+          } else {
+            setClaimStatus("error");
+          }
+        }
+      } catch (error) {
+        console.error(error);
+        if (!cancelled) setClaimStatus("error");
+      }
+    }
+
+    loadClaimStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 async function handleMarkAsNewMember() {
     const user = auth.currentUser;
 
@@ -86,11 +143,12 @@ async function handleMarkAsNewMember() {
     }
 
     if (
+      !birthdayYear.trim() ||
       !birthdayMonth.trim() ||
       !birthdayDay.trim()
     ) {
       setMessage(
-        "請輸入生日月份與日期。"
+        "請輸入完整出生年月日。"
       );
       return;
     }
@@ -103,7 +161,7 @@ async function handleMarkAsNewMember() {
 
       const response =
         await fetch(
-          "/api/legacy-members/claim",
+          "/api/admin/legacy-members/claim",
           {
             method: "POST",
 
@@ -190,6 +248,53 @@ setMessage(
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  if (claimStatus === "loading") {
+    return (
+      <div className="mt-8 rounded-2xl bg-slate-50 p-5 text-slate-600">
+        正在確認舊會員認領狀態……
+      </div>
+    );
+  }
+
+  if (claimStatus === "error") {
+    return (
+      <div className="mt-8 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-700">
+        暫時無法取得認領狀態，請重新整理頁面後再試。
+      </div>
+    );
+  }
+
+  if (claimStatus === "pending" || isSuccess) {
+    return (
+      <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-800">
+        ⏳ 認領申請已送出，正在等待老師審核。
+      </div>
+    );
+  }
+
+  if (claimStatus === "approved") {
+    return (
+      <div className="mt-8 rounded-2xl border border-green-200 bg-green-50 p-5 text-green-800">
+        ✓ 舊會員點數已成功移轉
+      </div>
+    );
+  }
+
+  if (claimStatus === "rejected" && !isOpen) {
+    return (
+      <div className="mt-8 rounded-2xl border border-orange-200 bg-orange-50 p-5 text-orange-800">
+        <p>認領申請未通過，請確認資料後重新申請。</p>
+        <button
+          type="button"
+          onClick={() => setIsOpen(true)}
+          className="mt-3 rounded-xl bg-orange-600 px-5 py-2 font-semibold text-white"
+        >
+          重新申請
+        </button>
+      </div>
+    );
   }
 
   if (isSuccess) {
@@ -322,7 +427,7 @@ setMessage(
             </div>
 
             <p className="mt-2 text-xs text-slate-500">
-              若舊系統沒有登記出生年份，可以只填月與日。
+              請填寫舊系統登記的完整出生年月日。
             </p>
           </div>
 
@@ -361,3 +466,4 @@ setMessage(
     </article>
   );
 }
+
