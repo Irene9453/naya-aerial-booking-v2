@@ -149,6 +149,42 @@ const [showAllPointTransactions, setShowAllPointTransactions] =
             setIsLoading(false);
             return;
           }
+
+          // Emulator-only：已驗證 Email 的舊會員自動接續認領。
+          if (
+            process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true" &&
+            process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === "demo-naya-aerial"
+          ) {
+            // 認領資料由後端查詢，避免前端直接讀取敏感資料。
+            const token = await user.getIdToken(true);
+
+            if (cancelled) return;
+
+            const response = await fetch(
+              "/api/legacy-members/auto-claim",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({}),
+              }
+            );
+
+            // 404 表示沒有舊會員認領申請，一般會員正常進入。
+            if (response.status !== 404) {
+              const result = await response.json().catch(() => ({}));
+
+              if (!response.ok || result.status !== "approved") {
+                throw new Error(
+                  typeof result.error === "string"
+                    ? result.error
+                    : "舊會員點數自動移轉失敗。"
+                );
+              }
+            }
+          }
         }
       } catch (error) {
         console.error("確認會員 Email 驗證狀態失敗：", error);

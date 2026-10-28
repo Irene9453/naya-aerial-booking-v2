@@ -27,6 +27,22 @@ type ApiResult = {
   created?: number;
   skipped?: number;
   errors?: string[];
+  total?: number;
+  valid?: number;
+  importable?: number;
+  duplicateCount?: number;
+  existingCount?: number;
+  invalidCount?: number;
+  coursePointsTotal?: number;
+  rewardPointsTotal?: number;
+  preview?: Array<{
+    line: number;
+    name: string;
+    phone: string;
+    birthday: string;
+    points: number;
+    rewardPoints: number;
+  }>;
 };
 
 async function adminPost(path: string, body: unknown): Promise<ApiResult> {
@@ -76,6 +92,7 @@ export function AdminLegacyMemberManager() {
   const [batchText, setBatchText] = useState("");
   const [isBatchSaving, setIsBatchSaving] = useState(false);
   const [batchMessage, setBatchMessage] = useState("");
+  const [batchPreview, setBatchPreview] = useState<ApiResult | null>(null);
 
   useEffect(() => {
     const legacyQuery = query(collection(db, "legacyMembers"), orderBy("createdAt", "desc"));
@@ -179,19 +196,74 @@ export function AdminLegacyMemberManager() {
     } finally { setIsDeleting(false); }
   }
 
-  async function submitBatch() {
-    if (!batchText.trim()) { setBatchMessage("請先貼上舊會員資料。"); return; }
-    setIsBatchSaving(true); setBatchMessage("");
+  async function previewBatch() {
+    if (!batchText.trim()) {
+      setBatchMessage("請先貼上舊會員資料。");
+      return;
+    }
+
+    setIsBatchSaving(true);
+    setBatchMessage("");
+    setBatchPreview(null);
+
     try {
-      const data = await adminPost("/api/admin/legacy-members/batch-create", { text: batchText });
-      const details = data.errors?.length ? `\n${data.errors.slice(0, 8).join("\n")}` : "";
-      setBatchMessage(`完成：新增 ${data.created ?? 0} 筆，略過 ${data.skipped ?? 0} 筆。${details}`);
+      const data = await adminPost(
+        "/api/admin/legacy-members/batch-preview",
+        { text: batchText }
+      );
+
+      setBatchPreview(data);
+      setBatchMessage(
+        `預覽完成：共 ${data.total ?? 0} 筆，可匯入 ${data.importable ?? 0} 筆，` +
+        `同批重複 ${data.duplicateCount ?? 0} 筆，已存在 ${data.existingCount ?? 0} 筆，` +
+        `格式錯誤 ${data.invalidCount ?? 0} 筆。`
+      );
+    } catch (error) {
+      setBatchPreview(null);
+      setBatchMessage(error instanceof Error ? error.message : "預覽失敗。");
+    } finally {
+      setIsBatchSaving(false);
+    }
+  }
+
+  async function confirmBatch() {
+    if (!batchPreview || !batchPreview.importable) {
+      setBatchMessage("沒有可匯入的資料，請先重新預覽。");
+      return;
+    }
+
+    if (!window.confirm(
+      `即將匯入 ${batchPreview.importable} 位會員。` +
+      `\n課程點數合計：${batchPreview.coursePointsTotal ?? 0}` +
+      `\n紅利點數合計：${batchPreview.rewardPointsTotal ?? 0}` +
+      "\n確定要正式匯入嗎？"
+    )) return;
+
+    setIsBatchSaving(true);
+    setBatchMessage("");
+
+    try {
+      const data = await adminPost(
+        "/api/admin/legacy-members/batch-create",
+        { text: batchText }
+      );
+
+      const details = data.errors?.length
+        ? `\n${data.errors.slice(0, 8).join("\n")}`
+        : "";
+
+      setBatchMessage(
+        `匯入完成：新增 ${data.created ?? 0} 筆，略過 ${data.skipped ?? 0} 筆。${details}`
+      );
+      setBatchPreview(null);
+
       if ((data.created ?? 0) > 0) setBatchText("");
     } catch (error) {
       setBatchMessage(error instanceof Error ? error.message : "批次新增失敗。");
-    } finally { setIsBatchSaving(false); }
+    } finally {
+      setIsBatchSaving(false);
+    }
   }
-
  return (
   <section className="mt-8 rounded-3xl bg-white p-7 shadow-sm md:p-8">
     <AdminLegacyClaimReview />
@@ -249,7 +321,13 @@ export function AdminLegacyMemberManager() {
         <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm leading-7 text-slate-600"><p className="font-semibold text-slate-800">每行一位，欄位用 Tab 或逗號分隔：</p><p>姓名, 手機, 生日, 課程點數, 紅利點數</p><p className="mt-2 font-mono text-xs">王小美,0912345678,1995/08/20,10,2</p><p className="font-mono text-xs">陳小華　0987654321　1992-03-05　5　0</p><p className="mt-2 text-xs">生日接受 YYYY/MM/DD、YYYY-MM-DD；紅利點數可省略，預設 0。</p></div>
         <textarea value={batchText} onChange={(e) => setBatchText(e.target.value)} rows={12} placeholder="在這裡貼上舊系統會員資料……" className="mt-5 w-full rounded-2xl border border-slate-300 px-4 py-3 font-mono text-sm outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-100"/>
         {batchMessage && <pre className="mt-4 whitespace-pre-wrap rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">{batchMessage}</pre>}
-        <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setShowBatch(false)} disabled={isBatchSaving} className="rounded-xl border border-slate-300 px-5 py-3 font-semibold text-slate-700">取消</button><button type="button" onClick={submitBatch} disabled={isBatchSaving} className="rounded-xl bg-violet-600 px-6 py-3 font-semibold text-white disabled:opacity-50">{isBatchSaving ? "新增中……" : "開始批次新增"}</button></div>
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+  <button type="button" onClick={() => setShowBatch(false)} disabled={isBatchSaving} className="rounded-xl border border-slate-300 px-5 py-3 font-semibold text-slate-700">取消</button>
+  <button type="button" onClick={previewBatch} disabled={isBatchSaving} className="rounded-xl border border-violet-300 px-5 py-3 font-semibold text-violet-700 disabled:opacity-50">{isBatchSaving ? "處理中……" : "預覽資料"}</button>
+  {batchPreview && (
+    <button type="button" onClick={confirmBatch} disabled={isBatchSaving || !batchPreview.importable} className="rounded-xl bg-violet-600 px-6 py-3 font-semibold text-white disabled:opacity-50">{isBatchSaving ? "匯入中……" : `確認匯入 ${batchPreview.importable ?? 0} 筆`}</button>
+  )}
+</div>
       </div></div>}
     </section>
   );

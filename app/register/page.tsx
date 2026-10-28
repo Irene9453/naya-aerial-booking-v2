@@ -65,20 +65,56 @@ export default function RegisterPage() {
     setStage(type === "legacy" ? "legacy-info" : "form");
   }
 
-  function handleLegacyInfo(event: FormEvent<HTMLFormElement>) {
+  async function handleLegacyInfo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!isValidTaiwanMobile(normalizeTaiwanPhone(phone))) {
+    setMessage("");
+
+    const normalizedPhone = normalizeTaiwanPhone(phone);
+    const birth = parseBirthday(birthday);
+
+    if (!isValidTaiwanMobile(normalizedPhone)) {
       setMessage("請輸入正確的台灣手機號碼，例如 0912345678。");
       return;
     }
-    if (!parseBirthday(birthday)) {
+
+    if (!birth) {
       setMessage("請填寫正確的生日。");
       return;
     }
-    setMessage("");
-    // 手機＋生日只是資料比對線索，不能證明身分。
-    // 不在未驗證身分前公開舊會員姓名及點數。
-    setStage("form");
+
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch("/api/legacy-members/precheck", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: normalizedPhone,
+          birthdayYear: birth.birthdayYear,
+          birthdayMonth: birth.birthdayMonth,
+          birthdayDay: birth.birthdayDay,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "會員資料確認失敗，請稍後再試。");
+      }
+
+      if (result.matched !== true) {
+        setMessage("資料無法確認，請檢查手機與生日，或聯繫老師。");
+        return;
+      }
+
+      setStage("form");
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "會員資料確認失敗。"
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -233,18 +269,51 @@ export default function RegisterPage() {
   async function checkEmailVerified() {
     setIsSubmitting(true);
     setMessage("");
+
     try {
       const user = auth.currentUser;
-      if (!user) throw new Error("登入狀態已失效，請重新登入。");
+
+      if (!user) {
+        throw new Error("登入狀態已失效，請重新登入。");
+      }
+
       await reload(user);
+
       if (!user.emailVerified) {
         setMessage("Email 尚未完成驗證。請先點擊驗證信中的連結，再回來按此按鈕。");
         return;
       }
-      await user.getIdToken(true);
+
+      const token = await user.getIdToken(true);
+
+      if (memberType === "legacy") {
+        const response = await fetch("/api/legacy-members/auto-claim", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({}),
+        });
+
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok || result.status !== "approved") {
+          throw new Error(
+            typeof result.error === "string"
+              ? result.error
+              : "舊會員點數尚未完成移轉，請稍後重試。"
+          );
+        }
+      }
+
       router.replace(getSafeRedirectPath());
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "確認驗證狀態失敗。");
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "確認驗證狀態失敗，請稍後重試。"
+      );
     } finally {
       setIsSubmitting(false);
     }
