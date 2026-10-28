@@ -269,7 +269,7 @@ setMessage(
   if (claimStatus === "pending" || isSuccess) {
     return (
       <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-800">
-        ⏳ 認領申請已送出，正在等待老師審核。
+        ⏳ 舊會員資料確認中。若符合自動認領條件，系統將於 Email 驗證完成後自動移轉點數及歷史上課紀錄；若需人工確認，老師將協助處理。
       </div>
     );
   }

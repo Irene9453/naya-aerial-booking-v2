@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 
@@ -160,6 +160,26 @@ export async function POST(request: NextRequest) {
       const currentPoints = user.points ?? 0;
       const currentRewards = user.rewardPoints ?? 0;
 
+      // 舊系統已完成的上課堂數，僅在首次認領時移轉。
+      const legacyClasses = legacy.journeyLegacyClasses ?? 0;
+      const currentClasses = user.journeyLegacyClasses ?? 0;
+
+      if (
+        !Number.isSafeInteger(legacyClasses) ||
+        legacyClasses < 0 ||
+        legacyClasses > 100000 ||
+        !Number.isSafeInteger(currentClasses) ||
+        currentClasses < 0 ||
+        currentClasses > 100000
+      ) {
+        throw new Error("INVALID_LEGACY_CLASSES");
+      }
+
+      // 不覆蓋會員帳號原有的歷史上課紀錄。
+      if (currentClasses !== 0) {
+        throw new Error("LEGACY_CLASSES_CONFLICT");
+      }
+
       if (
         !validPoints(legacyPoints) ||
         !validPoints(legacyRewards) ||
@@ -208,6 +228,7 @@ export async function POST(request: NextRequest) {
       tx.update(userRef, {
         points: newPoints,
         rewardPoints: newRewards,
+        journeyLegacyClasses: legacyClasses,
         legacyMemberId,
         legacyClaimedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
@@ -283,6 +304,8 @@ export async function POST(request: NextRequest) {
       USER_NOT_FOUND: ["找不到申請會員帳號。", 404],
       USER_ALREADY_CLAIMED: ["此帳號已完成舊會員認領。", 409],
       INVALID_POINTS: ["會員點數資料異常，請人工確認。", 409],
+      INVALID_LEGACY_CLASSES: ["歷史上課堂數資料異常，請人工確認。", 409],
+      LEGACY_CLASSES_CONFLICT: ["此會員已有歷史上課紀錄，請確認後再核准，避免重複移轉。", 409],
       DUPLICATE_TRANSACTION: ["已存在移轉紀錄，禁止重複加點。", 409],
     };
 

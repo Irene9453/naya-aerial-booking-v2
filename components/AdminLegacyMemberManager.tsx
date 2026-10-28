@@ -43,7 +43,8 @@ type ApiResult = {
     points: number;
     rewardPoints: number;
   }>;
-};
+
+  journeyLegacyClassesTotal?: number;};
 
 async function adminPost(path: string, body: unknown): Promise<ApiResult> {
   const user = auth.currentUser;
@@ -236,6 +237,7 @@ export function AdminLegacyMemberManager() {
       `即將匯入 ${batchPreview.importable} 位會員。` +
       `\n課程點數合計：${batchPreview.coursePointsTotal ?? 0}` +
       `\n紅利點數合計：${batchPreview.rewardPointsTotal ?? 0}` +
+      `\n歷史上課堂數合計：${batchPreview.journeyLegacyClassesTotal ?? 0}` +
       "\n確定要正式匯入嗎？"
     )) return;
 

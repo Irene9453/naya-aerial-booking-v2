@@ -128,12 +128,16 @@ export async function POST(request: NextRequest) {
     }
 
     const legacyRef = legacyMatches.docs[0].ref;
+    const phoneRegistryRef = adminDb
+      .collection("phoneRegistry")
+      .doc(phone);
 
     const result = await adminDb.runTransaction(async (tx) => {
       // Transaction 內重新讀取，防止同時認領。
       const claimDoc = await tx.get(claimRef);
       const legacyDoc = await tx.get(legacyRef);
       const userDoc = await tx.get(userRef);
+      const phoneRegistryDoc = await tx.get(phoneRegistryRef);
 
       if (!claimDoc.exists || !legacyDoc.exists || !userDoc.exists) {
         throw new Error("MISSING_DATA");
@@ -142,6 +146,18 @@ export async function POST(request: NextRequest) {
       const latestClaim = claimDoc.data() ?? {};
       const legacy = legacyDoc.data() ?? {};
       const user = userDoc.data() ?? {};
+
+      // 確認手機仍綁定目前登入會員，且未被其他手機取代。
+      const phoneRegistry = phoneRegistryDoc.data();
+
+      if (
+        !phoneRegistryDoc.exists ||
+        phoneRegistry?.userId !== uid ||
+        phoneRegistry?.phone !== phone ||
+        phoneRegistry?.status === "replaced"
+      ) {
+        throw new Error("PHONE_REGISTRY_MISMATCH");
+      }
 
       // 重複呼叫只回傳已完成，不再加點。
       if (latestClaim.status === "approved") {
@@ -207,6 +223,26 @@ export async function POST(request: NextRequest) {
       const currentPoints = user.points ?? 0;
       const currentRewards = user.rewardPoints ?? 0;
 
+      // 舊系統完成課程堂數：只在首次認領時移轉。
+      const legacyClasses = legacy.journeyLegacyClasses ?? 0;
+      const currentClasses = user.journeyLegacyClasses ?? 0;
+
+      if (
+        !Number.isSafeInteger(legacyClasses) ||
+        legacyClasses < 0 ||
+        legacyClasses > 100000 ||
+        !Number.isSafeInteger(currentClasses) ||
+        currentClasses < 0 ||
+        currentClasses > 100000
+      ) {
+        throw new Error("INVALID_LEGACY_CLASSES");
+      }
+
+      // 已有歷史堂數時不自動覆蓋，避免重複計算。
+      if (currentClasses !== 0) {
+        throw new Error("LEGACY_CLASSES_CONFLICT");
+      }
+
       if (
         !validPoints(legacyPoints) ||
         !validPoints(legacyRewards) ||
@@ -245,6 +281,7 @@ export async function POST(request: NextRequest) {
       tx.update(userRef, {
         points: newPoints,
         rewardPoints: newRewards,
+        journeyLegacyClasses: legacyClasses,
         legacyMemberId: legacyRef.id,
         legacyClaimedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
@@ -319,7 +356,10 @@ export async function POST(request: NextRequest) {
       CLAIM_CONFLICT: "認領申請狀態異常，請聯繫老師。",
       ALREADY_CLAIMED: "此舊會員已完成認領，無法重複移轉。",
       IDENTITY_MISMATCH: "會員資料比對失敗，請聯繫老師。",
+      PHONE_REGISTRY_MISMATCH: "手機綁定資料不一致，請聯繫老師。",
       INVALID_POINTS: "點數資料異常，請聯繫老師。",
+      INVALID_LEGACY_CLASSES: "舊會員上課紀錄異常，請聯繫老師。",
+      LEGACY_CLASSES_CONFLICT: "帳號已有歷史上課紀錄，請聯繫老師確認，避免重複移轉。",
       DUPLICATE_TRANSACTION: "已有點數移轉紀錄，禁止重複加點。",
     };
 

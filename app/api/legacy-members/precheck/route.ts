@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
+import { checkLegacyPrecheckRateLimit } from "@/lib/legacyPrecheckRateLimit";
 
 export const runtime = "nodejs";
 
@@ -18,6 +19,21 @@ export async function POST(request: NextRequest) {
     );
   }
   try {
+    // Emulator 測試專用：不信任使用者提供的 IP 標頭。
+    const limit = await checkLegacyPrecheckRateLimit("local-emulator");
+
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: "查詢次數過多，請稍後再試。" },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(limit.retryAfter),
+          },
+        }
+      );
+    }
+
     const body = await request.json();
 
     const phone = String(body.phone ?? "").replace(/\D/g, "");

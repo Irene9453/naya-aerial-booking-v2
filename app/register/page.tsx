@@ -309,6 +309,23 @@ export default function RegisterPage() {
 
       router.replace(getSafeRedirectPath());
     } catch (error) {
+      const errorCode =
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error
+          ? String(error.code)
+          : "";
+
+      if (
+        errorCode === "auth/user-token-expired" ||
+        errorCode === "auth/id-token-expired" ||
+        errorCode === "auth/user-disabled" ||
+        errorCode === "auth/invalid-user-token"
+      ) {
+        setMessage("登入狀態已失效，請返回登入頁面重新登入。已建立的會員帳號不會因此消失，請勿重複註冊。");
+        return;
+      }
+
       setMessage(
         error instanceof Error
           ? error.message
@@ -465,7 +482,7 @@ export default function RegisterPage() {
             {memberType === "legacy" && (
               <p className="mt-4 rounded-xl bg-violet-50 p-4 text-sm leading-6 text-violet-800">
                 {claimSubmitted
-                  ? "舊會員認領申請已送出，老師核准後才會移轉課程點數及紅利點數。"
+                  ? "完成 Email 驗證後，系統將自動確認舊會員身分，並移轉剩餘課程點數、紅利點數及歷史上課紀錄。"
                   : "舊會員認領申請尚未成功，請完成 Email 驗證後聯絡老師協助。"}
               </p>
             )}

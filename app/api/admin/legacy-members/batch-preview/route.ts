@@ -27,7 +27,7 @@ function parseLine(line: string, index: number) {
     throw new Error(`第 ${index} 行：欄位不足`);
   }
 
-  const [nameRaw, phoneRaw, birthdayRaw, pointsRaw, rewardRaw = "0"] = parts;
+  const [nameRaw, phoneRaw, birthdayRaw, pointsRaw, rewardRaw = "0", classesRaw = "0"] = parts;
 
   const name = nameRaw.trim();
   const phone = phoneRaw.replace(/\D/g, "");
@@ -53,6 +53,7 @@ function parseLine(line: string, index: number) {
 
   const points = Number(pointsRaw);
   const rewardPoints = Number(rewardRaw || 0);
+  const journeyLegacyClasses = Number(classesRaw);
 
   if (!Number.isInteger(points) || points < 0) {
     throw new Error(`第 ${index} 行：課程點數需為 0 以上整數`);
@@ -60,6 +61,10 @@ function parseLine(line: string, index: number) {
 
   if (!Number.isInteger(rewardPoints) || rewardPoints < 0) {
     throw new Error(`第 ${index} 行：紅利點數需為 0 以上整數`);
+  }
+
+  if (!Number.isSafeInteger(journeyLegacyClasses) || journeyLegacyClasses < 0 || journeyLegacyClasses > 100000) {
+    throw new Error(`第 ${index} 行：歷史堂數需為 0～100000 的整數`);
   }
 
   return {
@@ -70,6 +75,7 @@ function parseLine(line: string, index: number) {
     birthdayDay,
     points,
     rewardPoints,
+    journeyLegacyClasses,
   };
 }
 
@@ -99,6 +105,7 @@ export async function POST(request: NextRequest) {
       birthdayDay: number;
       points: number;
       rewardPoints: number;
+      journeyLegacyClasses: number;
     }> = [];
 
     const errors: string[] = [];
@@ -154,6 +161,7 @@ export async function POST(request: NextRequest) {
       invalidCount: formatErrorCount,
       coursePointsTotal: importable.reduce((sum, row) => sum + row.points, 0),
       rewardPointsTotal: importable.reduce((sum, row) => sum + row.rewardPoints, 0),
+      journeyLegacyClassesTotal: importable.reduce((sum, row) => sum + row.journeyLegacyClasses, 0),
       errors: [
         ...errors,
         ...valid
@@ -167,6 +175,7 @@ export async function POST(request: NextRequest) {
         birthday: `${row.birthdayYear}/${String(row.birthdayMonth).padStart(2, "0")}/${String(row.birthdayDay).padStart(2, "0")}`,
         points: row.points,
         rewardPoints: row.rewardPoints,
+        journeyLegacyClasses: row.journeyLegacyClasses,
       })),
     });
   } catch (error) {
