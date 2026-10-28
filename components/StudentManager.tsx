@@ -11,6 +11,9 @@ import { db } from "@/lib/firebase";
 import AdminPointButton from "@/components/AdminPointButton";
 import SellPackageButton from "@/components/SellPackageButton";
 import StudentDetailModal from "@/components/StudentDetailModal";
+import ExportStudentLessonRecordsButton from "@/components/ExportStudentLessonRecordsButton";
+import AddLegacyStudentButton from "@/components/AddLegacyStudentButton";
+import StudentJourneyModal from "@/components/StudentJourneyModal";
 
 export type StudentData = {
   id: string;
@@ -23,6 +26,7 @@ export type StudentData = {
 
   points: number;
   rewardPoints: number;
+journeyLegacyClasses?: number;
 
   birthdayYear: number;
   birthdayMonth: number;
@@ -69,6 +73,9 @@ function formatBirthday(student: StudentData) {
 export default function StudentManager({
   students,
 }: StudentManagerProps) {
+
+  const [journeyStudent, setJourneyStudent] =
+  useState<StudentData | null>(null);
   const [searchText, setSearchText] =
     useState("");
 
@@ -531,28 +538,35 @@ phone:
   <>
     <article className="mt-8 rounded-3xl bg-white p-7 shadow-sm md:p-9">
       {/* 標題 */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-600">
-            Students
-          </p>
+<div className="flex flex-wrap items-center justify-between gap-4">
+  <div>
+    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-600">
+      Students
+    </p>
 
-          <h2 className="mt-2 text-2xl font-bold text-slate-900">
-            會員與點數
-          </h2>
+    <h2 className="mt-2 text-2xl font-bold text-slate-900">
+      會員與點數
+    </h2>
 
-          <p className="mt-2 text-sm text-slate-500">
-            目前共有{" "}
-            {
-              students.filter(
-                (student) =>
-                  student.role === "student"
-              ).length
-            }{" "}
-            位學生
-          </p>
-        </div>
-      </div>
+    <p className="mt-2 text-sm text-slate-500">
+      目前共有{" "}
+      {
+        students.filter(
+          (student) =>
+            student.role ===
+            "student"
+        ).length
+      }{" "}
+      位學生
+    </p>
+  </div>
+
+  <div className="flex flex-wrap gap-3">
+    <AddLegacyStudentButton />
+
+    <ExportStudentLessonRecordsButton />
+  </div>
+</div>
 
       {/* 搜尋與篩選 */}
       <div className="mt-7 rounded-2xl bg-slate-50 p-5">
@@ -775,7 +789,13 @@ phone:
                       >
                         編輯會員
                       </button>
-
+<button
+  type="button"
+  onClick={() => setJourneyStudent(student)}
+  className="rounded-xl border border-sky-300 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-50"
+>
+  🪽 空中旅程
+</button>
                       <SellPackageButton
                         studentId={student.id}
                         studentName={student.name}
@@ -1080,6 +1100,12 @@ phone:
           </div>
         </div>
       )}
+      {journeyStudent && (
+  <StudentJourneyModal
+    student={journeyStudent}
+    onClose={() => setJourneyStudent(null)}
+  />
+)}
     </>
   );
 }

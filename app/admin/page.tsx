@@ -20,6 +20,11 @@ import AdminRevenueSummary from "@/components/AdminRevenueSummary";
 import AdminInitializeCoupons from "@/components/AdminInitializeCoupons";
 import AdminPurchaseRequests from "@/components/AdminPurchaseRequests";
 import AdminSpecialLeaveManager from "@/components/AdminSpecialLeaveManager";
+import MovementLibrary from "@/components/MovementLibrary";
+import {
+  AdminLegacyMemberManager,
+} from "@/components/AdminLegacyMemberManager";
+import AdminMilestoneRewards from "@/components/AdminMilestoneRewards";
 
 type StudentData = {
   id: string;
@@ -31,7 +36,8 @@ type StudentData = {
   experience: string;
 
   points: number;
-  rewardPoints: number;
+rewardPoints: number;
+journeyLegacyClasses?: number;
 
   birthdayYear: number;
   birthdayMonth: number;
@@ -43,6 +49,7 @@ type StudentData = {
 type ClassData = {
   id: string;
   courseName: string;
+  location: string;
   startTime: Timestamp | null;
   pointsRequired: number;
   capacity: number;
@@ -138,7 +145,9 @@ export default function AdminPage() {
   rewardPoints: Number(
     data.rewardPoints ?? 0
   ),
-
+journeyLegacyClasses: Number(
+  data.journeyLegacyClasses ?? 0
+),
   birthdayYear: Number(
     data.birthdayYear ?? 0
   ),
@@ -182,6 +191,7 @@ export default function AdminPage() {
                   return {
                     id: classDocument.id,
                     courseName: String(data.courseName ?? ""),
+                    location: String(data.location ?? ""),
                     startTime:
                       data.startTime instanceof Timestamp
                         ? data.startTime
@@ -196,10 +206,11 @@ allowMonthlyBooking: Boolean(
                   };
                 })
                 .sort((a, b) => {
-                  const firstTime = a.startTime?.toMillis() ?? 0;
-                  const secondTime = b.startTime?.toMillis() ?? 0;
-                  return firstTime - secondTime;
-                });
+  const firstTime = a.startTime?.toMillis() ?? 0;
+  const secondTime = b.startTime?.toMillis() ?? 0;
+
+  return secondTime - firstTime;
+});
 
               setClasses(nextClasses);
             },
@@ -290,36 +301,31 @@ allowMonthlyBooking: Boolean(
 {/* 今日課程 */}
 <AdminTodayClasses classes={classes} />
 
-{/* 收入統計 */}
-<AdminRevenueSummary />
-
 {/* 購買申請 */}
 <AdminPurchaseRequests />
-<AdminTodayClasses classes={classes} />
-
-<AdminRevenueSummary />
-
-<AdminSpecialLeaveManager />
-
-<StudentManager students={students} />
-
-<ClassManager classes={classes} />
-
-<AdminPackageManager />
-
-<AdminInitializeCoupons />
-
-{/* 會員管理 */}
-<StudentManager students={students} />
 
 {/* 課程管理 */}
 <ClassManager classes={classes} />
+
+{/* 舊會員移轉管理 */}
+<AdminLegacyMemberManager />
+{/* 會員管理 */}
+<StudentManager students={students} />
+
+{/* 里程碑獎勵管理 */}
+<AdminMilestoneRewards />
+
+<AdminSpecialLeaveManager />
+<MovementLibrary />
 
 {/* 課卡管理 */}
 <AdminPackageManager />
 
 {/* 優惠管理 */}
 <AdminInitializeCoupons />
+
+{/* 收入統計 */}
+<AdminRevenueSummary />
 
 {message && (
   <p className="mt-6 text-center text-sm text-red-600">

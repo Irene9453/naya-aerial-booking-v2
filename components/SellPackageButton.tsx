@@ -1,6 +1,7 @@
+
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   collection,
   onSnapshot,
@@ -26,6 +27,12 @@ type PackageData = {
   isActive: boolean;
 };
 
+type PendingOperation = {
+  studentId: string;
+  packageId: string;
+  operationId: string;
+};
+
 export default function SellPackageButton({
   studentId,
   studentName,
@@ -36,11 +43,13 @@ export default function SellPackageButton({
   const [selectedPackageId, setSelectedPackageId] = useState("");
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+
+  const [pendingOperation, setPendingOperation] =
+    useState<PendingOperation | null>(null);
 
   useEffect(() => {
-    if (!showDialog) {
-      return;
-    }
+    if (!showDialog) return;
 
     const packagesQuery = query(
       collection(db, "packages"),
@@ -50,23 +59,23 @@ export default function SellPackageButton({
     const unsubscribe = onSnapshot(
       packagesQuery,
       (snapshot) => {
-        const nextPackages = snapshot.docs
-          .map((packageDocument) => {
-            const data = packageDocument.data();
+        setPackages(
+          snapshot.docs
+            .map((packageDocument) => {
+              const data = packageDocument.data();
 
-            return {
-              id: packageDocument.id,
-              name: String(data.name ?? ""),
-              points: Number(data.points ?? 0),
-              price: Number(data.price ?? 0),
-              displayOrder: Number(data.displayOrder ?? 0),
-              description: String(data.description ?? ""),
-              isActive: Boolean(data.isActive ?? false),
-            };
-          })
-          .filter((item) => item.isActive);
-
-        setPackages(nextPackages);
+              return {
+                id: packageDocument.id,
+                name: String(data.name ?? ""),
+                points: Number(data.points ?? 0),
+                price: Number(data.price ?? 0),
+                displayOrder: Number(data.displayOrder ?? 0),
+                description: String(data.description ?? ""),
+                isActive: Boolean(data.isActive ?? false),
+              };
+            })
+            .filter((item) => item.isActive)
+        );
       },
       (error) => {
         console.error(error);
@@ -81,7 +90,70 @@ export default function SellPackageButton({
     (item) => item.id === selectedPackageId
   );
 
+  function getStorageKey(adminId: string) {
+    return `naya_package_sale_${adminId}_${studentId}`;
+  }
+
+  function openDialog() {
+    const admin = auth.currentUser;
+
+    setMessage("");
+    setSelectedPackageId("");
+    setPendingOperation(null);
+
+    if (admin) {
+      const saved = sessionStorage.getItem(
+        getStorageKey(admin.uid)
+      );
+
+      if (saved) {
+        try {
+          const operation = JSON.parse(
+            saved
+          ) as PendingOperation;
+
+          if (
+            operation.studentId === studentId &&
+            typeof operation.packageId === "string" &&
+            typeof operation.operationId === "string"
+          ) {
+            setPendingOperation(operation);
+            setSelectedPackageId(operation.packageId);
+            setMessage(
+              "偵測到尚未確認結果的銷售。請確認交易紀錄；若要重試，請保持原本的課卡選擇。"
+            );
+          }
+        } catch {
+          setMessage(
+            "先前銷售紀錄格式異常，請先檢查會員點數及課卡銷售紀錄。"
+          );
+          setPendingOperation({
+            studentId,
+            packageId: "",
+            operationId: "",
+          });
+        }
+      }
+    }
+
+    setShowDialog(true);
+  }
+
+  function selectPackage(packageId: string) {
+    if (pendingOperation) {
+      setMessage(
+        "目前有尚未確認結果的銷售，請先完成或核對原本的操作。"
+      );
+      return;
+    }
+
+    setSelectedPackageId(packageId);
+    setMessage("");
+  }
+
   async function handleSellPackage() {
+    if (submittingRef.current) return;
+
     const admin = auth.currentUser;
 
     if (!admin) {
@@ -94,30 +166,69 @@ export default function SellPackageButton({
       return;
     }
 
-    setMessage("");
+    if (
+      pendingOperation &&
+      pendingOperation.packageId !== selectedPackage.id
+    ) {
+      setMessage("待確認的課卡與目前選擇不一致。");
+      return;
+    }
+
+    const operation: PendingOperation =
+      pendingOperation ?? {
+        studentId,
+        packageId: selectedPackage.id,
+        operationId: crypto.randomUUID(),
+      };
+
+    // 在送出前先保存，避免網路中斷後遺失
+    try {
+      sessionStorage.setItem(
+        getStorageKey(admin.uid),
+        JSON.stringify(operation)
+      );
+    } catch {
+      setMessage(
+        "無法保存銷售操作識別碼，請確認瀏覽器儲存功能後再試。"
+      );
+      return;
+    }
+
+    setPendingOperation(operation);
+    submittingRef.current = true;
     setIsSubmitting(true);
+    setMessage("");
 
     try {
       const result = await sellPackage({
         adminId: admin.uid,
         studentId,
         packageId: selectedPackage.id,
+        operationId: operation.operationId,
       });
 
-      setMessage(
-        `販售成功！${studentName} 已增加 ${result.packagePoints} 點，目前共有 ${result.newBalance} 點。`
+      sessionStorage.removeItem(
+        getStorageKey(admin.uid)
       );
 
+      setPendingOperation(null);
       setSelectedPackageId("");
+
+      setMessage(
+        `${result.alreadyProcessed ? "此筆銷售先前已完成，未重複加點。" : "販售成功！"}${studentName} 已增加 ${result.packagePoints} 點，銷售完成時餘額為 ${result.newBalance} 點。`
+      );
     } catch (error: unknown) {
       console.error(error);
 
       setMessage(
-        error instanceof Error
-          ? error.message
-          : "課卡販售失敗，請稍後再試。"
+        `${
+          error instanceof Error
+            ? error.message
+            : "課卡販售結果不明。"
+        } 請先檢查銷售紀錄；如需重試，請使用同一個「確認販售」按鈕，不要重新建立操作。`
       );
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   }
@@ -126,11 +237,7 @@ export default function SellPackageButton({
     <>
       <button
         type="button"
-        onClick={() => {
-          setMessage("");
-          setSelectedPackageId("");
-          setShowDialog(true);
-        }}
+        onClick={openDialog}
         className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
       >
         售出課卡
@@ -151,7 +258,6 @@ export default function SellPackageButton({
               <p className="text-sm text-slate-500">
                 目前點數
               </p>
-
               <p className="mt-2 text-4xl font-bold text-sky-700">
                 {currentPoints} 點
               </p>
@@ -171,10 +277,14 @@ export default function SellPackageButton({
                   {packages.map((item) => (
                     <label
                       key={item.id}
-                      className={`block cursor-pointer rounded-2xl border p-5 transition ${
+                      className={`block rounded-2xl border p-5 transition ${
                         selectedPackageId === item.id
                           ? "border-sky-500 bg-sky-50"
-                          : "border-slate-200 bg-white hover:border-sky-200"
+                          : "border-slate-200 bg-white"
+                      } ${
+                        pendingOperation || isSubmitting
+                          ? "cursor-not-allowed opacity-80"
+                          : "cursor-pointer hover:border-sky-200"
                       }`}
                     >
                       <div className="flex items-start gap-4">
@@ -183,8 +293,12 @@ export default function SellPackageButton({
                           name={`package-${studentId}`}
                           value={item.id}
                           checked={selectedPackageId === item.id}
+                          disabled={
+                            Boolean(pendingOperation) ||
+                            isSubmitting
+                          }
                           onChange={() =>
-                            setSelectedPackageId(item.id)
+                            selectPackage(item.id)
                           }
                           className="mt-1"
                         />
@@ -195,19 +309,16 @@ export default function SellPackageButton({
                               <h3 className="font-bold text-slate-900">
                                 {item.name}
                               </h3>
-
                               {item.description && (
                                 <p className="mt-1 text-sm text-slate-500">
                                   {item.description}
                                 </p>
                               )}
                             </div>
-
                             <p className="font-bold text-sky-700">
                               NT$ {item.price.toLocaleString()}
                             </p>
                           </div>
-
                           <p className="mt-3 text-sm font-semibold text-slate-700">
                             增加 {item.points} 點
                           </p>
@@ -225,7 +336,6 @@ export default function SellPackageButton({
                   <span className="text-slate-600">
                     課卡
                   </span>
-
                   <span className="font-semibold text-slate-900">
                     {selectedPackage.name}
                   </span>
@@ -235,7 +345,6 @@ export default function SellPackageButton({
                   <span className="text-slate-600">
                     售價
                   </span>
-
                   <span className="font-semibold text-slate-900">
                     NT$ {selectedPackage.price.toLocaleString()}
                   </span>
@@ -245,7 +354,6 @@ export default function SellPackageButton({
                   <span className="text-slate-600">
                     增加點數
                   </span>
-
                   <span className="font-semibold text-emerald-700">
                     +{selectedPackage.points} 點
                   </span>
@@ -254,9 +362,8 @@ export default function SellPackageButton({
                 <div className="mt-3 border-t border-slate-100 pt-3">
                   <div className="flex justify-between gap-4">
                     <span className="text-slate-600">
-                      販售後餘額
+                      販售後預估餘額
                     </span>
-
                     <span className="font-bold text-sky-700">
                       {currentPoints + selectedPackage.points} 點
                     </span>
@@ -266,7 +373,7 @@ export default function SellPackageButton({
             )}
 
             {message && (
-              <p className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <p className="mt-5 rounded-xl bg-sky-50 px-4 py-3 text-sm text-sky-800">
                 {message}
               </p>
             )}
@@ -287,7 +394,11 @@ export default function SellPackageButton({
                 disabled={!selectedPackage || isSubmitting}
                 className="flex-1 rounded-xl bg-sky-600 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isSubmitting ? "處理中……" : "確認販售"}
+                {isSubmitting
+                  ? "處理中……"
+                  : pendingOperation
+                    ? "重試／確認原銷售"
+                    : "確認販售"}
               </button>
             </div>
           </div>

@@ -1,17 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
 import {
   collection,
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   query,
   Timestamp,
   where,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { bookClass } from "@/lib/bookingService";
+import {
+  cancelWaitlist,
+  joinWaitlist,
+} from "@/lib/waitlistService";
 
 type BookClassButtonProps = {
   classId: string;
@@ -86,7 +94,8 @@ export default function BookClassButton({
 
   const [bookingSuccess, setBookingSuccess] =
     useState(false);
-
+const [alreadyBooked, setAlreadyBooked] =
+  useState(false);
   const [showConfirmation, setShowConfirmation] =
     useState(false);
 
@@ -94,7 +103,15 @@ export default function BookClassButton({
     useState(0);
 
   const [message, setMessage] = useState("");
+const [
+  isWaitlisted,
+  setIsWaitlisted,
+] = useState(false);
 
+const [
+  isWaitlistProcessing,
+  setIsWaitlistProcessing,
+] = useState(false);
   const [bookingMode, setBookingMode] =
     useState<BookingMode>("single");
 
@@ -103,7 +120,162 @@ export default function BookClassButton({
 
   const [selectedClassIds, setSelectedClassIds] =
     useState<string[]>([]);
+useEffect(() => {
+  const user = auth.currentUser;
 
+  if (!user) {
+    setAlreadyBooked(false);
+    return;
+  }
+
+  const bookingId =
+    `${user.uid}_${classId}`;
+
+  const bookingRef = doc(
+    db,
+    "bookings",
+    bookingId
+  );
+
+  const unsubscribe = onSnapshot(
+    bookingRef,
+    (snapshot) => {
+      if (!snapshot.exists()) {
+        setAlreadyBooked(false);
+        return;
+      }
+
+      const data = snapshot.data();
+
+      setAlreadyBooked(
+        data.status === "booked"
+      );
+    },
+    (error) => {
+      console.error(
+        "監聽預約狀態失敗：",
+        error
+      );
+    }
+  );
+
+    return unsubscribe;
+}, [classId]);
+
+// 監聽目前會員是否已加入這堂課的候補
+useEffect(() => {
+  const user = auth.currentUser;
+
+  if (!user) {
+    setIsWaitlisted(false);
+    return;
+  }
+
+  const waitlistRef = doc(
+    db,
+    "waitlists",
+    `${user.uid}_${classId}`
+  );
+
+  const unsubscribe = onSnapshot(
+    waitlistRef,
+    (snapshot) => {
+      if (!snapshot.exists()) {
+        setIsWaitlisted(false);
+        return;
+      }
+
+      const data = snapshot.data();
+
+      setIsWaitlisted(
+        data.status === "waiting"
+      );
+    },
+    (error) => {
+      console.error(
+        "監聽候補狀態失敗：",
+        error
+      );
+    }
+  );
+
+  return unsubscribe;
+}, [classId]);
+async function handleJoinWaitlist() {
+  const user = auth.currentUser;
+
+  if (!user) {
+    window.location.href =
+      `/login?redirect=${encodeURIComponent(
+        "/booking"
+      )}`;
+
+    return;
+  }
+
+  setMessage("");
+  setIsWaitlistProcessing(true);
+
+  try {
+    await joinWaitlist({
+      userId: user.uid,
+      classId,
+    });
+
+    setIsWaitlisted(true);
+
+    setMessage(
+      "已加入候補！若課程釋出名額，系統會通知你。"
+    );
+  } catch (error: unknown) {
+    console.error(error);
+
+    setMessage(
+      error instanceof Error
+        ? error.message
+        : "加入候補失敗，請稍後再試。"
+    );
+  } finally {
+    setIsWaitlistProcessing(false);
+  }
+}
+
+async function handleCancelWaitlist() {
+  const user = auth.currentUser;
+
+  if (!user) {
+    window.location.href =
+      "/login";
+
+    return;
+  }
+
+  setMessage("");
+  setIsWaitlistProcessing(true);
+
+  try {
+    await cancelWaitlist({
+      userId: user.uid,
+      classId,
+    });
+
+    setIsWaitlisted(false);
+
+    setMessage(
+      "已取消候補。"
+    );
+  } catch (error: unknown) {
+    console.error(error);
+
+    setMessage(
+      error instanceof Error
+        ? error.message
+        : "取消候補失敗，請稍後再試。"
+    );
+  } finally {
+    setIsWaitlistProcessing(false);
+  }
+}
   async function handleOpenConfirmation() {
     setMessage("");
 
@@ -133,7 +305,27 @@ export default function BookClassButton({
       );
 
       setCurrentPoints(points);
+// 先確認目前這堂是否已經預約
+const currentBookingId =
+  `${user.uid}_${classId}`;
 
+const currentBookingSnapshot =
+  await getDoc(
+    doc(
+      db,
+      "bookings",
+      currentBookingId
+    )
+  );
+
+if (
+  currentBookingSnapshot.exists() &&
+  currentBookingSnapshot.data().status === "booked"
+) {
+  setAlreadyBooked(true);
+  setMessage("");
+  return;
+}
       // 目前點擊的課程
       const currentClassSnapshot = await getDoc(
         doc(db, "classes", classId)
@@ -320,6 +512,26 @@ setRelatedClasses(finalClasses);
 setSelectedClassIds([classId]);
 setBookingMode("single");
 
+// 開啟預約確認視窗前，先檢查 Email 驗證
+const currentUser = auth.currentUser;
+
+if (!currentUser) {
+  setMessage("請先登入會員，才能預約課程。");
+  return;
+}
+
+try {
+  await currentUser.reload();
+} catch {
+  setMessage("無法確認 Email 驗證狀態，請稍後再試。");
+  return;
+}
+
+if (!currentUser.emailVerified) {
+  setMessage("請先完成 Email 驗證，才能預約課程。");
+  return;
+}
+
 setShowConfirmation(true);
     } catch (error) {
       console.error(error);
@@ -408,15 +620,30 @@ setShowConfirmation(true);
     totalPointsRequired;
 
   async function handleConfirmBooking() {
-    const user = auth.currentUser;
+  const user = auth.currentUser;
 
-    if (!user) {
-      window.location.href =
-        `/login?redirect=${encodeURIComponent("/booking")}`;
-      return;
-    }
+  if (!user) {
+    window.location.href =
+      `/login?redirect=${encodeURIComponent("/booking")}`;
+    return;
+  }
 
-    const idsToBook =
+  // 預約前重新取得 Firebase Email 驗證狀態
+  try {
+    await user.reload();
+  } catch {
+    setMessage("無法確認 Email 驗證狀態，請稍後再試。");
+    setShowConfirmation(false);
+    return;
+  }
+
+  if (!user.emailVerified) {
+    setMessage("請先完成 Email 驗證，才能預約課程。");
+    setShowConfirmation(false);
+    return;
+  }
+
+  const idsToBook =
       bookingMode === "single"
         ? [classId]
         : selectedClassIds;
@@ -470,7 +697,10 @@ setShowConfirmation(true);
       }
 
       setCurrentPoints(latestPoints);
-      setShowConfirmation(false);
+
+if (successCount > 0) {
+  setShowConfirmation(false);
+}
 
       if (
         successCount > 0 &&
@@ -516,17 +746,108 @@ if (isPast) {
   );
 }
   if (isFull) {
+  if (alreadyBooked) {
     return (
       <button
         type="button"
         disabled
-        className="mt-7 w-full cursor-not-allowed rounded-xl bg-slate-300 px-6 py-3 font-semibold text-white"
+        className="mt-7 w-full cursor-not-allowed rounded-xl bg-emerald-100 px-6 py-3 font-semibold text-emerald-700"
       >
-        已滿班
+        ✓ 已預約此課程
       </button>
     );
   }
 
+  if (isWaitlisted) {
+    return (
+      <div className="mt-7">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-center">
+          <p className="font-semibold text-amber-800">
+            ✓ 已加入候補
+          </p>
+
+          <p className="mt-1 text-sm leading-6 text-amber-700">
+            若有會員取消並釋出名額，
+            系統會通知所有候補會員。
+          </p>
+
+          <p className="mt-1 text-xs text-amber-600">
+            名額以實際完成預約者為準。
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={
+            handleCancelWaitlist
+          }
+          disabled={
+            isWaitlistProcessing
+          }
+          className="mt-3 w-full rounded-xl border border-slate-300 px-6 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isWaitlistProcessing
+            ? "處理中……"
+            : "取消候補"}
+        </button>
+
+        {message && (
+          <p className="mt-3 text-center text-sm text-slate-600">
+            {message}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-7">
+      <div className="rounded-2xl bg-slate-50 px-5 py-4 text-center">
+        <p className="font-semibold text-slate-700">
+          此課程目前已滿班
+        </p>
+
+        <p className="mt-1 text-sm text-slate-500">
+          可以先加入候補，
+          有名額釋出時系統會通知你。
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={
+          handleJoinWaitlist
+        }
+        disabled={
+          isWaitlistProcessing
+        }
+        className="mt-3 w-full rounded-xl bg-amber-500 px-6 py-3 font-semibold text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {isWaitlistProcessing
+          ? "加入候補中……"
+          : "加入候補"}
+      </button>
+
+      {message && (
+        <p className="mt-3 text-center text-sm text-slate-600">
+          {message}
+        </p>
+      )}
+    </div>
+  );
+}
+
+if (alreadyBooked) {
+  return (
+    <button
+      type="button"
+      disabled
+      className="mt-7 w-full cursor-not-allowed rounded-xl bg-emerald-100 px-6 py-3 font-semibold text-emerald-700"
+    >
+      ✓ 已預約此課程
+    </button>
+  );
+}
   return (
     <>
       <button

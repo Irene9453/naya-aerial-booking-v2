@@ -1,10 +1,4 @@
-import {
-  doc,
-  runTransaction,
-  serverTimestamp,
-  Timestamp,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { auth } from "@/lib/firebase";
 
 type BookClassParams = {
   userId: string;
@@ -15,147 +9,39 @@ export async function bookClass({
   userId,
   classId,
 }: BookClassParams) {
-  const userRef = doc(db, "users", userId);
-  const classRef = doc(db, "classes", classId);
+  const currentUser = auth.currentUser;
 
-  // 同一位學生對同一堂課只會有一個固定預約 ID
-  const bookingId = `${userId}_${classId}`;
-  const bookingRef = doc(db, "bookings", bookingId);
-
-  const operationId = Date.now().toString();
-
-const pointTransactionRef = doc(
-  db,
-  "pointTransactions",
-  `${bookingId}_booking_${operationId}`
-);
-
-const notificationRef = doc(
-  db,
-  "notifications",
-  `${bookingId}_booked_${operationId}`
-);
-
-  return runTransaction(db, async (transaction) => {
-    // Transaction 規定先讀取，再進行寫入
-    const userSnapshot = await transaction.get(userRef);
-    const classSnapshot = await transaction.get(classRef);
-    const bookingSnapshot = await transaction.get(bookingRef);
-
-    if (!userSnapshot.exists()) {
-      throw new Error("找不到會員資料");
-    }
-
-    if (!classSnapshot.exists()) {
-      throw new Error("找不到課程資料");
-    }
-
-    if (bookingSnapshot.exists()) {
-  const existingBooking = bookingSnapshot.data();
-
-  if (existingBooking.status === "booked") {
-    throw new Error("你已經預約過這堂課");
+  if (!currentUser) {
+    throw new Error("請先登入會員");
   }
 
-  if (existingBooking.status !== "cancelled") {
-    throw new Error("這堂課已有無法重新預約的紀錄");
+  if (currentUser.uid !== userId) {
+    throw new Error("會員身分不符，請重新登入");
   }
-}
 
-    const userData = userSnapshot.data();
-    const classData = classSnapshot.data();
+  const idToken = await currentUser.getIdToken();
 
-    const currentPoints = Number(userData.points ?? 0);
-    const pointsRequired = Number(classData.pointsRequired ?? 0);
-    const bookedCount = Number(classData.bookedCount ?? 0);
-    const capacity = Number(classData.capacity ?? 0);
-    const status = String(classData.status ?? "");
-
-    if (status !== "open") {
-      throw new Error("這堂課目前無法預約");
-    }
-
-    if (capacity <= 0) {
-      throw new Error("課程名額設定不正確");
-    }
-
-    if (bookedCount >= capacity) {
-      throw new Error("這堂課已經滿班");
-    }
-
-    if (pointsRequired <= 0) {
-      throw new Error("課程點數設定不正確");
-    }
-
-    if (currentPoints < pointsRequired) {
-      throw new Error("點數不足，無法預約");
-    }
-
-    if (!(classData.startTime instanceof Timestamp)) {
-  throw new Error("課程時間設定不正確");
-}
-
-// 已開始或已結束的課程不可預約
-const now = new Date();
-const classStartTime = classData.startTime.toDate();
-
-if (classStartTime.getTime() <= now.getTime()) {
-  throw new Error("此課程已開始，無法預約");
-}
-
-const remainingPoints = currentPoints - pointsRequired;
-
-    // 扣除會員點數
-    transaction.update(userRef, {
-      points: remainingPoints,
-    });
-
-    // 課程預約人數 +1
-    transaction.update(classRef, {
-      bookedCount: bookedCount + 1,
-    });
-
-    // 建立預約紀錄
-    transaction.set(bookingRef, {
-  userId,
-  classId,
-  courseName: String(classData.courseName ?? ""),
-  classStartTime: classData.startTime,
-  pointsUsed: pointsRequired,
-  status: "booked",
-  createdAt: serverTimestamp(),
-  cancelledAt: null,
-  pointsRefunded: 0,
-});
-
-    // 建立點數異動紀錄
-    transaction.set(pointTransactionRef, {
-      userId,
-      bookingId,
+  const response = await fetch("/api/bookings/book", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({
       classId,
-      courseName: String(classData.courseName ?? ""),
-      type: "booking",
-      amount: -pointsRequired,
-      balanceAfter: remainingPoints,
-      createdAt: serverTimestamp(),
-    });
-
-    transaction.set(notificationRef, {
-  userId,
-  type: "booking",
-  title: "預約成功",
-  body: `你已成功預約 ${String(classData.courseName ?? "")}`,
-  classId,
-  bookingId,
-  courseName: String(classData.courseName ?? ""),
-  classStartTime: classData.startTime,
-  isRead: false,
-  createdAt: serverTimestamp(),
-});
-
-    return {
-      bookingId,
-      remainingPoints,
-    };
+    }),
   });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data.error ?? "預約失敗，請稍後再試"
+    );
+  }
+
+  return {
+    bookingId: data.bookingId as string,
+    remainingPoints: data.remainingPoints as number,
+  };
 }

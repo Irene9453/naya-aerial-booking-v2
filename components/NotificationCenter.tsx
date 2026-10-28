@@ -85,6 +85,7 @@ export default function NotificationCenter() {
           });
 
         setNotifications(nextNotifications);
+setMessage("");
       },
       (error) => {
         console.error(error);
