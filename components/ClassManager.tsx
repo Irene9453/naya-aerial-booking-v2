@@ -2,12 +2,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Timestamp } from "firebase/firestore";
 
 import AdminCreateClass from "@/components/AdminCreateClass";
 import AdminEditClassLocation from "@/components/AdminEditClassLocation";
 import AdminClassRoster from "@/components/AdminClassRoster";
+import AdminCancelWholeClass from "@/components/AdminCancelWholeClass";
 import ClassLessonContent from "@/components/ClassLessonContent";
 import ExportClassRecordsButton from "@/components/ExportClassRecordsButton";
 import ClassPreparationAssistant from "@/components/ClassPreparationAssistant";
@@ -133,31 +134,13 @@ export default function ClassManager({
       (group) => group.key !== "unscheduled"
     )?.key;
 
-  // 第一次載入時自動展開最新月份
+  // 初次載入展開最新月份，並排除已不存在的月份
   const activeExpandedMonths =
-    expandedMonths ??
-    (latestMonthKey ? [latestMonthKey] : []);
-
-  // 課程月份更新時，移除已不存在的月份狀態
-  useEffect(() => {
-    setExpandedMonths((previous) => {
-      if (previous === null) {
-        return null;
-      }
-
-      const validKeys = new Set(
-        monthGroups.map((group) => group.key)
-      );
-
-      const next = previous.filter((key) =>
-        validKeys.has(key)
-      );
-
-      return next.length === previous.length
-        ? previous
-        : next;
-    });
-  }, [monthGroups]);
+    expandedMonths === null
+      ? (latestMonthKey ? [latestMonthKey] : [])
+      : expandedMonths.filter((key) =>
+          monthGroups.some((group) => group.key === key)
+        );
 
   function toggleMonth(monthKey: string) {
     setExpandedMonths((previous) => {
@@ -365,7 +348,15 @@ export default function ClassManager({
                               courseName={
                                 classItem.courseName
                               }
+                            />                            <AdminCancelWholeClass
+                              classId={classItem.id}
+                              courseName={classItem.courseName}
+                              startTimeMillis={
+                                classItem.startTime?.toMillis() ?? null
+                              }
+                              status={classItem.status}
                             />
+
                           </div>
                         </div>
 

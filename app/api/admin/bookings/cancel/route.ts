@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
+import { sendWaitlistPush } from "@/lib/sendWaitlistPush";
 
 export const runtime = "nodejs";
 
@@ -619,6 +620,30 @@ export async function POST(request: NextRequest) {
             if (chunk.length > 0) {
               await batch.commit();
             }
+// 候補通知寫入成功後，嘗試發送推播。
+// sendWaitlistPush 目前有安全鎖，不會發送正式 FCM。
+for (const waitlistDoc of chunk) {
+  const waitlistUserId = waitlistDoc.data().userId;
+
+  if (
+    typeof waitlistUserId !== "string" ||
+    !waitlistUserId
+  ) {
+    continue;
+  }
+
+  try {
+    await sendWaitlistPush(
+      waitlistUserId,
+      String(latestClassData?.courseName ?? "候補課程")
+    );
+  } catch (pushError) {
+    console.error(
+      "[Naya Push] 老師代取消後候補推播失敗：",
+      pushError
+    );
+  }
+}
           }
         }
       } catch (waitlistError) {

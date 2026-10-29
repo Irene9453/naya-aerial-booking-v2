@@ -271,10 +271,13 @@ export default function RegisterPage() {
     setMessage("");
 
     try {
+      await auth.authStateReady();
+
       const user = auth.currentUser;
 
       if (!user) {
-        throw new Error("登入狀態已失效，請重新登入。");
+        router.replace("/login?redirect=%2Fmember");
+        return;
       }
 
       await reload(user);
@@ -284,9 +287,8 @@ export default function RegisterPage() {
         return;
       }
 
-      const token = await user.getIdToken(true);
-
       if (memberType === "legacy") {
+        const token = await user.getIdToken(true);
         const response = await fetch("/api/legacy-members/auto-claim", {
           method: "POST",
           headers: {
@@ -309,6 +311,7 @@ export default function RegisterPage() {
 
       router.replace(getSafeRedirectPath());
     } catch (error) {
+      console.error("[Naya Email Verification] Error:", error);
       const errorCode =
         typeof error === "object" &&
         error !== null &&
@@ -322,7 +325,8 @@ export default function RegisterPage() {
         errorCode === "auth/user-disabled" ||
         errorCode === "auth/invalid-user-token"
       ) {
-        setMessage("登入狀態已失效，請返回登入頁面重新登入。已建立的會員帳號不會因此消失，請勿重複註冊。");
+        setMessage("Email 驗證流程已結束，正在前往登入頁面……");
+        router.replace("/login?redirect=%2Fmember");
         return;
       }
 

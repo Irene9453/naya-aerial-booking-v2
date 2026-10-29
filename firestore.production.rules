@@ -1,0 +1,672 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================
+    // 共用 Functions
+    // =========================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn()
+        && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        )
+        && get(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        ).data.role == "admin";
+    }
+
+    // 取得指定課程
+    function getClass(classId) {
+      return get(
+        /databases/$(database)/documents/classes/$(classId)
+      );
+    }
+
+    // =========================
+    // 台北時間計算
+    // =========================
+
+    // Firestore Timestamp 本身以 UTC 計算。
+    // 先 +8 小時後取 date()，
+    // 就能得到「台北日期」的 00:00，
+    // 再 -8 小時轉回真正 Timestamp。
+    function taipeiDayStart(timestampValue) {
+      return (
+        timestampValue + duration.value(8, 'h')
+      ).date() - duration.value(8, 'h');
+    }
+
+    // 一般取消期限：
+    // 上課當天 00:00（台北時間）的前 1ms
+    // = 前一天 23:59:59.999
+    function cancellationDeadline(classStartTime) {
+      return taipeiDayStart(classStartTime)
+        - duration.value(1, 'ms');
+    }
+
+    // 取得目前台北時間概念
+    function taipeiRequestTime() {
+      return request.time + duration.value(8, 'h');
+    }
+
+
+    // =========================
+    // 會員資料
+    // =========================
+    match /users/{userId} {
+
+  // 新會員只能建立自己的學生帳號，初始點數及紅利皆為 0
+  allow create: if isOwner(userId)
+                && request.resource.data.role == "student"
+                && request.resource.data.points == 0
+                && request.resource.data.rewardPoints == 0;
+
+  // 會員只能讀取自己的資料，管理員可讀取所有會員
+  allow read: if isOwner(userId) || isAdmin();
+
+  // 只有管理員可以修改會員資料及點數
+  allow update: if isAdmin();
+
+  allow delete: if false;
+
+  // 推播裝置 Token：會員只能管理自己的裝置
+  match /pushTokens/{deviceId} {
+
+    allow get, list: if isOwner(userId);
+
+    allow create: if isOwner(userId)
+      && request.resource.data.keys().hasOnly([
+        "token", "createdAt", "updatedAt"
+      ])
+      && request.resource.data.keys().hasAll([
+        "token", "createdAt", "updatedAt"
+      ])
+      && request.resource.data.token is string
+      && request.resource.data.token.size() > 20
+      && request.resource.data.token.size() <= 4096
+      && request.resource.data.createdAt == request.time
+      && request.resource.data.updatedAt == request.time;
+
+    allow update: if isOwner(userId)
+      && request.resource.data.keys().hasOnly([
+        "token", "createdAt", "updatedAt"
+      ])
+      && request.resource.data.token == resource.data.token
+      && request.resource.data.createdAt == resource.data.createdAt
+      && request.resource.data.updatedAt == request.time;
+
+    allow delete: if isOwner(userId);
+  }
+}
+
+// =========================
+// 舊系統待認領會員
+// =========================
+match /legacyMembers/{legacyId} {
+
+  allow read, create, update, delete:
+    if isAdmin();
+}
+// 舊會員認領申請
+match /legacyClaimRequests/{requestId} {
+  // 僅管理員可以讀取申請資料
+  allow read: if isAdmin();
+
+  // 申請由後端 API 建立
+  // 審核結果也由後端 API 更新
+  allow create, update, delete: if false;
+}
+    // =========================
+    // 動作資料庫
+    // =========================
+    match /movements/{movementId} {
+
+      allow read: if isAdmin();
+
+      allow create, update, delete:
+        if isAdmin();
+    }
+
+
+    // =========================
+    // 手機唯一性 Registry
+    // =========================
+    match /phoneRegistry/{phoneNumber} {
+
+      allow get: if isSignedIn();
+
+      allow create: if isAdmin()
+                    || (
+                      isSignedIn()
+                      && request.resource.data.userId
+                        == request.auth.uid
+                      && request.resource.data.phone
+                        == phoneNumber
+                    );
+
+      allow update: if isAdmin();
+
+      allow delete: if false;
+
+      allow list: if isAdmin();
+    }
+
+
+    // =========================
+    // 課程
+    // =========================
+    match /classes/{classId} {
+
+      allow read: if true;
+
+      // Only admins can directly modify classes.
+      allow update: if isAdmin();
+
+      allow create, delete: if isAdmin();
+    }
+
+    // =========================
+    // 預約
+    // =========================
+    match /bookings/{bookingId} {
+
+      allow get: if isSignedIn()
+                 && (
+                   bookingId.matches(
+                     request.auth.uid + "_.*"
+                   )
+                   || isAdmin()
+                 );
+
+      allow list: if isAdmin()
+                  || (
+                    isSignedIn()
+                    && resource.data.userId
+                      == request.auth.uid
+                  );
+
+      // =========================
+// 建立預約
+// =========================
+      // 預約、取消、重新預約及特殊請假由後端 API 處理
+      // 會員不得直接修改預約紀錄
+      allow create, update, delete: if isAdmin();
+    }
+
+    // =========================
+    // 課程候補
+    // =========================
+    match /waitlists/{waitlistId} {
+
+  // 讀取單筆候補紀錄
+  // BookClassButton 會監聽：
+  // waitlists/{userId}_{classId}
+  //
+  // 即使文件還不存在，
+  // 本人也必須可以 get 自己的候補文件 ID。
+  allow get: if isAdmin()
+             || (
+                  isSignedIn()
+                  && waitlistId.matches(
+                    request.auth.uid + "_.*"
+                  )
+                );
+
+  // Admin 可以查看所有候補。
+  // 一般會員查詢時只能讀自己的候補。
+  allow list: if isAdmin()
+              || (
+                   isSignedIn()
+                   && resource.data.userId
+                     == request.auth.uid
+                 );
+
+  // =========================
+  // 加入候補
+  // =========================
+  allow create: if isSignedIn()
+                && (exists(/databases/$(database)/documents/systemSettings/booking) && get(/databases/$(database)/documents/systemSettings/booking).data.waitlistEnabled == true)
+
+                // 文件 ID 必須完全符合「會員UID_課程ID」
+&& request.resource.data.classId is string
+&& waitlistId ==
+   request.auth.uid + "_" + request.resource.data.classId
+
+                // 只能替自己候補
+                && request.resource.data.userId
+                  == request.auth.uid
+
+                // 必須是有效 classId
+                && request.resource.data.classId
+                  is string
+
+                // 課程必須仍為 open
+                && getClass(
+                  request.resource.data.classId
+                ).data.status == "open"
+
+                // 課程尚未開始
+                && request.time
+                  < getClass(
+                      request.resource.data.classId
+                    ).data.startTime
+
+                // 必須真的已經滿班
+                && getClass(
+                  request.resource.data.classId
+                ).data.bookedCount
+                  >= getClass(
+                       request.resource.data.classId
+                     ).data.capacity
+
+                // 課程資料必須吻合
+                && request.resource.data.courseName
+                  == getClass(
+                       request.resource.data.classId
+                     ).data.courseName
+
+                && request.resource.data.classStartTime
+                  == getClass(
+                       request.resource.data.classId
+                     ).data.startTime
+
+                // 只能建立候補功能需要的欄位
+&& request.resource.data.keys().hasAll([
+  "userId", "classId", "courseName", "classStartTime",
+  "status", "createdAt", "cancelledAt",
+  "convertedAt", "lastNotifiedAt"
+])
+
+&& request.resource.data.keys().hasOnly([
+  "userId", "classId", "courseName", "classStartTime",
+  "status", "createdAt", "cancelledAt",
+  "convertedAt", "lastNotifiedAt"
+])
+
+// 新候補只能是 waiting
+&& request.resource.data.status == "waiting"
+
+// 建立時間必須使用伺服器時間
+&& request.resource.data.createdAt == request.time
+
+// 新候補不得偽造取消、轉正或通知紀錄
+&& request.resource.data.cancelledAt == null
+&& request.resource.data.convertedAt == null
+&& request.resource.data.lastNotifiedAt == null;
+
+  // =========================
+  // 更新候補
+  // =========================
+  allow update: if isAdmin()
+                || (
+                     isSignedIn()
+
+                     && waitlistId.matches(
+                       request.auth.uid + "_.*"
+                     )
+
+                     && resource.data.userId
+                       == request.auth.uid
+
+                     && request.resource.data.userId
+                       == resource.data.userId
+
+                     && request.resource.data.classId
+                       == resource.data.classId
+
+                     && request.resource.data.courseName
+                       == resource.data.courseName
+
+                     && request.resource.data.classStartTime
+                       == resource.data.classStartTime
+
+                     && (
+                       // waiting → cancelled
+                      (
+  resource.data.status == "waiting"
+  && request.resource.data.status == "cancelled"
+  && request.resource.data.diff(resource.data).affectedKeys()
+     .hasOnly(["status", "cancelledAt"])
+  && request.resource.data.cancelledAt == request.time
+)
+
+                       ||
+
+                       // cancelled → waiting
+                       // 重新加入候補
+                       (
+  resource.data.status == "cancelled"
+  && request.resource.data.status == "waiting"
+  && (exists(/databases/$(database)/documents/systemSettings/booking) && get(/databases/$(database)/documents/systemSettings/booking).data.waitlistEnabled == true)
+
+  // 只能重新設定候補所需的欄位
+  && request.resource.data.keys().hasOnly([
+    "userId", "classId", "courseName", "classStartTime",
+    "status", "createdAt", "cancelledAt",
+    "convertedAt", "lastNotifiedAt"
+  ])
+
+  // 課程必須仍開放、尚未開始且已滿班
+  && getClass(resource.data.classId).data.status == "open"
+  && request.time < getClass(resource.data.classId).data.startTime
+  && getClass(resource.data.classId).data.bookedCount
+     >= getClass(resource.data.classId).data.capacity
+
+  // 課程資訊必須與正式課程一致
+  && request.resource.data.courseName
+     == getClass(resource.data.classId).data.courseName
+  && request.resource.data.classStartTime
+     == getClass(resource.data.classId).data.startTime
+
+  // 重新加入時重設相關紀錄
+  && request.resource.data.createdAt == request.time
+  && request.resource.data.cancelledAt == null
+  && request.resource.data.convertedAt == null
+  && request.resource.data.lastNotifiedAt == null
+)
+
+
+                       )
+                   );
+
+  allow delete: if false;
+}
+    // =========================
+    // 學生上課 / 動作紀錄
+    // =========================
+    match /studentLessonRecords/{recordId} {
+
+      allow get, list: if isAdmin()
+                       || (
+                         isSignedIn()
+                         && resource.data.studentId
+                           == request.auth.uid
+                       );
+
+      allow create: if isAdmin()
+                    && request.resource.data.studentId
+                      is string
+                    && request.resource.data.classId
+                      is string;
+
+      allow update: if isAdmin()
+                    && request.resource.data.studentId
+                      == resource.data.studentId;
+
+      allow delete: if isAdmin();
+    }
+
+
+    // =========================
+    // 一般課程點數紀錄
+    // =========================
+    match /pointTransactions/{transactionId} {
+
+      allow get, list: if isAdmin()
+                       || (
+                         isSignedIn()
+                         && resource.data.userId
+                           == request.auth.uid
+                       );
+
+      allow create: if isAdmin();
+
+      allow update, delete:
+        if false;
+    }
+
+
+    // =========================
+    // 網站通知
+    // =========================
+    match /notifications/{notificationId} {
+
+      allow get, list: if isAdmin()
+                       || (
+                         isSignedIn()
+                         && resource.data.userId
+                           == request.auth.uid
+                       );
+
+      allow create: if isAdmin();
+
+      allow update: if isSignedIn()
+                    && resource.data.userId
+                      == request.auth.uid
+                    && request.resource.data.userId
+                      == request.auth.uid
+                    && request.resource.data
+                      .diff(resource.data)
+                      .affectedKeys()
+                      .hasOnly([
+                        "isRead"
+                      ]);
+
+      allow delete: if false;
+    }
+
+
+    // =========================
+    // 特殊請假
+    // =========================
+    match /specialLeaveRecords/{recordId} {
+
+  // =========================
+  // 讀取單筆特殊請假
+  // =========================
+  //
+  // useSpecialLeave() 在建立本期紀錄前，
+  // 會先 transaction.get() 檢查
+  // `${userId}_${periodKey}` 是否存在。
+  //
+  // 所以即使文件尚未建立，
+  // 也必須允許本人讀取「自己的文件 ID」。
+  allow get: if isAdmin()
+             || (
+               isSignedIn()
+               && recordId.matches(
+                 request.auth.uid + "_.*"
+               )
+             );
+
+
+  // =========================
+  // 查詢特殊請假紀錄
+  // =========================
+  //
+  // 已存在的文件仍依 userId 限制，
+  // 學生只能列出自己的資料。
+  allow list: if isAdmin()
+              || (
+                isSignedIn()
+                && resource.data.userId
+                  == request.auth.uid
+              );
+
+
+  // =========================
+  // 建立特殊請假
+  // =========================
+  allow create: if isSignedIn()
+
+                // 文件 ID 必須以本人 UID 開頭
+                && recordId.matches(
+                  request.auth.uid + "_.*"
+                )
+
+                // 只能建立自己的紀錄
+                && request.resource.data.userId
+                  == request.auth.uid
+
+                && request.resource.data.status
+                  == "approved"
+
+                // 必須是目前真正年份（台北時間）
+                && request.resource.data.periodYear
+                  == taipeiRequestTime().year()
+
+                // 半年必須與真正日期一致
+                && request.resource.data.periodHalf
+                  == (
+                    taipeiRequestTime().month() <= 6
+                      ? 1
+                      : 2
+                  )
+
+                // serverTimestamp
+                && request.resource.data.usedAt
+                  == request.time
+
+                && request.resource.data.createdAt
+                  == request.time
+
+                // 課程尚未開始
+                && request.time
+                  < getClass(
+                    request.resource.data.classId
+                  ).data.startTime;
+
+
+  allow update: if isAdmin();
+
+  allow delete: if false;
+}
+
+    // =========================
+    // 課卡購買申請
+    // =========================
+    match /purchaseRequests/{requestId} {
+
+      allow create: if isSignedIn()
+                    && request.resource.data.userId
+                      == request.auth.uid
+                    && request.resource.data.status
+                      == "pending"
+                    && request.resource.data.paymentStatus
+                      == "unpaid";
+
+      allow get, list: if isAdmin()
+                       || (
+                         isSignedIn()
+                         && resource.data.userId
+                           == request.auth.uid
+                       );
+
+      allow update: if isAdmin();
+
+      allow delete: if false;
+    }
+
+
+    // =========================
+    // 課卡商品
+    // =========================
+    match /packages/{packageId} {
+
+      allow read: if isSignedIn();
+
+      allow create, update, delete:
+        if isAdmin();
+    }
+
+
+    // =========================
+    // 課卡銷售
+    // =========================
+    match /packageSales/{saleId} {
+
+      allow read, create:
+        if isAdmin();
+
+      allow update, delete:
+        if false;
+    }
+
+
+    // =========================
+    // 優惠券模板
+    // =========================
+    match /coupons/{couponId} {
+
+      allow read: if isSignedIn();
+
+      allow create, update, delete:
+        if isAdmin();
+    }
+
+
+    // =========================
+    // 會員優惠券
+    // =========================
+    match /userCoupons/{userCouponId} {
+
+      allow get, list: if isAdmin()
+                       || (
+                         isSignedIn()
+                         && resource.data.userId
+                           == request.auth.uid
+                       );
+
+      allow create: if isAdmin();
+
+      allow update: if isAdmin();
+
+      allow delete: if false;
+    }
+
+
+    // =========================
+    // 紅利紀錄
+    // =========================
+    match /rewardTransactions/{transactionId} {
+
+      allow get, list: if isAdmin()
+                       || (
+                         isSignedIn()
+                         && resource.data.userId
+                           == request.auth.uid
+                       );
+
+      allow create: if isAdmin();
+
+      allow update, delete:
+        if false;
+    }
+
+    // =========================
+    // 生日優惠使用紀錄
+    // =========================
+    match /birthdayCouponUsage/{usageId} {
+
+      // 會員只能讀取自己的生日優惠使用紀錄
+      allow get: if isAdmin()
+        || (
+          isSignedIn()
+          && usageId.matches(
+            '^' + request.auth.uid + '_[0-9]{4}$'
+          )
+        );
+
+      // 僅管理員可查詢全部紀錄
+      allow list: if isAdmin();
+
+      // 僅管理員可建立及更新紀錄
+      allow create, update: if isAdmin();
+
+      // 禁止刪除
+      allow delete: if false;
+    }
+
+  }
+}

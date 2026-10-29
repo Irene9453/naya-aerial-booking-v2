@@ -6,6 +6,20 @@ import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
+  // 正式環境預設關閉新增預約；本機 Emulator 保留測試能力。
+  const isLocalEmulator =
+    process.env.NODE_ENV !== "production" &&
+    process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true" &&
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === "demo-naya-aerial" &&
+    process.env.FIRESTORE_EMULATOR_HOST === "127.0.0.1:8080" &&
+    process.env.FIREBASE_AUTH_EMULATOR_HOST === "127.0.0.1:9099";
+
+  if (!isLocalEmulator && process.env.NAYA_BOOKING_LIVE !== "true") {
+    return NextResponse.json(
+      { error: "新系統預約功能尚未開放，請稍後再試。" },
+      { status: 503 }
+    );
+  }
   try {
     const authorization = request.headers.get("authorization");
 
@@ -19,6 +33,16 @@ export async function POST(request: NextRequest) {
     const idToken = authorization.slice(7);
     const decodedToken = await adminAuth.verifyIdToken(idToken);
     const userId = decodedToken.uid;
+
+    // 管理員 API 必須確認登入者具有管理員權限。
+    const adminRoleSnap = await adminDb.collection("users").doc(userId).get();
+
+    if (!adminRoleSnap.exists || adminRoleSnap.data()?.role !== "admin") {
+      return NextResponse.json(
+        { error: "沒有管理員操作權限。" },
+        { status: 403 }
+      );
+    }
 
     // Firebase Authentication 是 Email 驗證狀態的權威來源。
     // 既有管理員暫時豁免，避免在過渡期間無法使用管理功能。

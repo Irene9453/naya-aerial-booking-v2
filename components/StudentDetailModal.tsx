@@ -201,15 +201,11 @@ export default function StudentDetailModal({
     setRewardTransactions,
   ] = useState<RewardTransactionRecord[]>([]);
 
-  const [isLoading, setIsLoading] =
-    useState(true);
+  const [, setIsLoading] = useState(true);
 
-  const [message, setMessage] =
-    useState("");
+const [, setMessage] = useState("");
 
-  useEffect(() => {
-    setIsLoading(true);
-    setMessage("");
+useEffect(() => {
 
    let loadedBookings = false;
 let loadedLessons = false;

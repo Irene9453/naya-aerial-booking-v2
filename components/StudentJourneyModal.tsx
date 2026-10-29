@@ -41,10 +41,8 @@ export default function StudentJourneyModal({ student, onClose }: StudentJourney
     return result as JourneySummary;
   }, [student.id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setMessage("");
+ useEffect(() => {
+  let cancelled = false;
     void loadSummary()
       .then((data) => {
         if (cancelled) return;

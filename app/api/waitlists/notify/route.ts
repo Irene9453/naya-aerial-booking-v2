@@ -1,10 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 
 import {
   adminAuth,
   adminDb,
 } from "@/lib/firebaseAdmin";
+import { sendWaitlistPush } from "@/lib/sendWaitlistPush";
 
 export async function POST(
   request: NextRequest
@@ -96,6 +97,18 @@ export async function POST(
         },
         {
           status: 400,
+        }
+      );
+    }
+
+    // 已取消或非開放中的課程，不可發送候補通知
+    if (classData.status !== "open") {
+      return NextResponse.json(
+        {
+          error: "此課程已取消或未開放，無法發送候補通知。",
+        },
+        {
+          status: 409,
         }
       );
     }
@@ -302,11 +315,43 @@ export async function POST(
       notifiedCount++;
     }
 
-    await batch.commit();
+       await batch.commit();
+
+    // 站內通知寫入成功後，嘗試發送推播。
+    // sendWaitlistPush 目前仍有安全鎖，
+    // 因此不會發送正式 FCM。
+    let pushAttemptedCount = 0;
+
+    for (const waitlistDoc of waitlistSnapshot.docs) {
+      const waitlistData = waitlistDoc.data();
+      const userId = String(waitlistData.userId ?? "");
+
+      if (!userId) {
+        continue;
+      }
+
+      try {
+        const pushResult = await sendWaitlistPush(
+          userId,
+          String(classData.courseName ?? "候補課程")
+        );
+
+        if (!pushResult.skipped) {
+          pushAttemptedCount +=
+            pushResult.sent + pushResult.failed;
+        }
+      } catch (pushError) {
+        console.error(
+          "[Naya Push] 候補推播失敗：",
+          pushError
+        );
+      }
+    }
 
     return NextResponse.json({
       success: true,
       notifiedCount,
+      pushAttemptedCount,
       message:
         `已通知 ${notifiedCount} 位候補會員。`,
     });

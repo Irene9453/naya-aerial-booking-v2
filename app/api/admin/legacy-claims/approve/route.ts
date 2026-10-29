@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
+import { prepareLegacyCouponTransfer } from "@/lib/legacyCouponTransfer";
 
 export const runtime = "nodejs";
 
@@ -224,7 +225,17 @@ export async function POST(request: NextRequest) {
         throw new Error("DUPLICATE_TRANSACTION");
       }
 
+      // 認領優惠券：所有讀取完成後才寫入。
+      const couponTransfer = await prepareLegacyCouponTransfer(
+        tx,
+        adminDb,
+        uid,
+        legacyMemberId,
+        legacy.coupons
+      );
       // 9. 所有讀取完成後，才開始寫入
+      couponTransfer.write();
+
       tx.update(userRef, {
         points: newPoints,
         rewardPoints: newRewards,

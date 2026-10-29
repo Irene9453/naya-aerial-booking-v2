@@ -22,6 +22,8 @@ import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import CancelBookingButton from "@/components/CancelBookingButton";
 import NotificationCenter from "@/components/NotificationCenter";
+import PushNotificationSettings from "@/components/PushNotificationSettings";
+import { cleanupCurrentUserPushToken } from "@/lib/pushTokenCleanup";
 import SpecialLeaveBalance from "@/components/SpecialLeaveBalance";
 import MemberAerialJourney from "@/components/MemberAerialJourney";
 import LegacyMemberClaim from "@/components/LegacyMemberClaim";
@@ -400,14 +402,27 @@ setMember({
   }
 
   async function handleLogout() {
-    try {
-      await signOut(auth);
-      router.replace("/login");
-    } catch (error) {
-      console.error(error);
-      setMessage("登出失敗，請稍後再試。");
+  try {
+    if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR !== "true") {
+      try {
+        await cleanupCurrentUserPushToken();
+      } catch (pushError) {
+        console.error("[Naya Push] Logout cleanup failed:", pushError);
+
+        setMessage(
+          "推播通知尚未成功清除，為避免其他人收到你的通知，請先關閉此裝置的瀏覽器通知權限，再重新登出。"
+        );
+        return;
+      }
     }
+
+    await signOut(auth);
+    router.replace("/login");
+  } catch (error) {
+    console.error(error);
+    setMessage("登出失敗，請稍後再試。");
   }
+}
 
   if (isLoading) {
     return (
@@ -623,6 +638,7 @@ const historyBookings = bookings
   </summary>
 
   <div className="border-t border-sky-100 px-4 pb-5 md:px-6">
+    <PushNotificationSettings />
     <NotificationCenter />
   </div>
 </details>

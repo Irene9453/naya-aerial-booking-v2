@@ -5,6 +5,18 @@ import { useEffect, useMemo, useState } from "react";
 import { auth, db } from "@/lib/firebase";
 import { AdminLegacyClaimReview } from "@/components/AdminLegacyClaimReview";
 
+type LegacyCoupon = {
+  couponId: string;
+  quantity: number;
+};
+
+type CouponOption = {
+  id: string;
+  name: string;
+  discountRate: number;
+  isActive: boolean;
+};
+
 type LegacyMember = {
   id: string;
   name: string;
@@ -15,6 +27,7 @@ type LegacyMember = {
   birthdayDay: number;
   points: number;
   rewardPoints: number;
+  coupons?: LegacyCoupon[];
   status: "unclaimed" | "claimed";
   claimedBy?: string;
 };
@@ -35,6 +48,7 @@ type ApiResult = {
   invalidCount?: number;
   coursePointsTotal?: number;
   rewardPointsTotal?: number;
+  couponCountTotal?: number;
   preview?: Array<{
     line: number;
     name: string;
@@ -83,6 +97,10 @@ export function AdminLegacyMemberManager() {
   const [editBirthdayDay, setEditBirthdayDay] = useState("");
   const [editPoints, setEditPoints] = useState("");
   const [editRewardPoints, setEditRewardPoints] = useState("");
+  const [editLegacyCoupons, setEditLegacyCoupons] = useState<LegacyCoupon[]>([]);
+  const [couponOptions, setCouponOptions] = useState<CouponOption[]>([]);
+  const [couponsLoaded, setCouponsLoaded] = useState(false);
+  const [couponLoadError, setCouponLoadError] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [editMessage, setEditMessage] = useState("");
 
@@ -112,6 +130,12 @@ export function AdminLegacyMemberManager() {
             birthdayDay: Number(data.birthdayDay ?? 0),
             points: Number(data.points ?? 0),
             rewardPoints: Number(data.rewardPoints ?? 0),
+            coupons: Array.isArray(data.coupons)
+              ? data.coupons.map((entry: Record<string, unknown>) => ({
+                  couponId: String(entry.couponId ?? ""),
+                  quantity: Number(entry.quantity ?? 0),
+                }))
+              : [],
             status:
   data.status === "claimed" ||
   Boolean(data.claimedBy) ||
@@ -128,6 +152,30 @@ export function AdminLegacyMemberManager() {
         console.error("讀取舊會員資料失敗：", error);
         setMessage("無法讀取舊會員資料。");
         setIsLoading(false);
+      }
+    );
+  }, []);
+
+  useEffect(() => {
+    return onSnapshot(
+      collection(db, "coupons"),
+      (snapshot) => {
+        setCouponOptions(snapshot.docs.map((item) => {
+          const data = item.data();
+          return {
+            id: item.id,
+            name: String(data.name ?? item.id),
+            discountRate: Number(data.discountRate ?? 1),
+            isActive: data.isActive === true,
+          };
+        }));
+        setCouponsLoaded(true);
+        setCouponLoadError("");
+      },
+      (error) => {
+        console.error("讀取優惠券種類失敗：", error);
+        setCouponsLoaded(false);
+        setCouponLoadError("無法讀取優惠券種類，請確認權限。");
       }
     );
   }, []);
@@ -161,11 +209,35 @@ export function AdminLegacyMemberManager() {
     setEditBirthdayDay(member.birthdayDay ? String(member.birthdayDay) : "");
     setEditPoints(String(member.points));
     setEditRewardPoints(String(member.rewardPoints));
+    setEditLegacyCoupons((member.coupons ?? []).map((item) => ({ ...item })));
     setEditMessage("");
   }
 
   async function saveEdit() {
     if (!editingMember) return;
+    if (!couponsLoaded || couponLoadError) {
+      setEditMessage("優惠券種類尚未成功載入，暫時無法儲存。");
+      return;
+    }
+
+    const totalCoupons = editLegacyCoupons.reduce(
+      (sum, item) => sum + item.quantity, 0
+    );
+
+    if (
+      editLegacyCoupons.some(
+        (item) =>
+          !couponOptions.some((option) => option.id === item.couponId) ||
+          !Number.isSafeInteger(item.quantity) ||
+          item.quantity < 1 ||
+          item.quantity > 30
+      ) ||
+      totalCoupons > 60
+    ) {
+      setEditMessage("優惠券種類或張數不正確，每種最多 30 張、合計最多 60 張。");
+      return;
+    }
+
     setIsSavingEdit(true); setEditMessage("");
     try {
       await adminPost("/api/admin/legacy-members/update", {
@@ -177,6 +249,7 @@ export function AdminLegacyMemberManager() {
         birthdayDay: editBirthdayDay,
         points: editPoints,
         rewardPoints: editRewardPoints,
+        coupons: editLegacyCoupons,
       });
       setEditingMember(null);
       setMessage("舊會員資料已更新。");
@@ -217,7 +290,7 @@ export function AdminLegacyMemberManager() {
       setBatchMessage(
         `預覽完成：共 ${data.total ?? 0} 筆，可匯入 ${data.importable ?? 0} 筆，` +
         `同批重複 ${data.duplicateCount ?? 0} 筆，已存在 ${data.existingCount ?? 0} 筆，` +
-        `格式錯誤 ${data.invalidCount ?? 0} 筆。`
+        `格式錯誤 ${data.invalidCount ?? 0} 筆，優惠券共 ${data.couponCountTotal ?? 0} 張。`
       );
     } catch (error) {
       setBatchPreview(null);
@@ -238,7 +311,7 @@ export function AdminLegacyMemberManager() {
       `\n課程點數合計：${batchPreview.coursePointsTotal ?? 0}` +
       `\n紅利點數合計：${batchPreview.rewardPointsTotal ?? 0}` +
       `\n歷史上課堂數合計：${batchPreview.journeyLegacyClassesTotal ?? 0}` +
-      "\n確定要正式匯入嗎？"
+      "\n優惠券總張數：${batchPreview.couponCountTotal ?? 0}\n確定要正式匯入嗎？"
     )) return;
 
     setIsBatchSaving(true);
@@ -313,6 +386,96 @@ export function AdminLegacyMemberManager() {
         <div className="mt-7 grid gap-5 sm:grid-cols-2"><Field label="姓名" value={editName} setValue={setEditName}/><Field label="手機" value={editPhone} setValue={setEditPhone}/></div>
         <p className="mb-2 mt-6 text-sm font-semibold text-slate-700">生日</p><div className="grid grid-cols-3 gap-3"><Field label="年" value={editBirthdayYear} setValue={setEditBirthdayYear} type="number" hideLabel/><Field label="月" value={editBirthdayMonth} setValue={setEditBirthdayMonth} type="number" hideLabel/><Field label="日" value={editBirthdayDay} setValue={setEditBirthdayDay} type="number" hideLabel/></div>
         <div className="mt-6 grid gap-5 sm:grid-cols-2"><Field label="課程點數" value={editPoints} setValue={setEditPoints} type="number"/><Field label="紅利點數" value={editRewardPoints} setValue={setEditRewardPoints} type="number"/></div>
+        <div className="mt-6 rounded-2xl border border-violet-100 bg-violet-50/50 p-5">
+          <h4 className="font-bold text-slate-800">🎟️ 舊會員剩餘優惠券</h4>
+          <p className="mt-1 text-sm text-slate-500">
+            設定會員尚未使用的優惠券，認領後會一併移轉。
+          </p>
+
+          {couponLoadError && (
+            <p className="mt-3 text-sm text-red-600">{couponLoadError}</p>
+          )}
+
+          {!couponsLoaded && !couponLoadError && (
+            <p className="mt-3 text-sm text-slate-500">優惠券載入中……</p>
+          )}
+
+          {couponsLoaded && (
+            <div className="mt-4 space-y-3">
+              {couponOptions
+                .filter((option) =>
+                  option.isActive ||
+                  editLegacyCoupons.some((item) => item.couponId === option.id)
+                )
+                .map((option) => {
+                  const current = editLegacyCoupons.find(
+                    (item) => item.couponId === option.id
+                  );
+
+                  return (
+                    <div key={option.id}
+                      className="flex items-center justify-between gap-3 rounded-xl bg-white p-3">
+                      <div>
+                        <p className="font-semibold text-slate-800">
+                          {option.name}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {Number((option.discountRate * 10).toFixed(2))} 折
+                          {!option.isActive ? "・已停用" : ""}
+                        </p>
+                      </div>
+
+                      <label className="flex items-center gap-2 text-sm">
+                        <span>張數</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={30}
+                          step={1}
+                          disabled={isSavingEdit}
+                          value={current?.quantity ?? 0}
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+
+                            setEditLegacyCoupons((previous) => {
+                              const remaining = previous.filter(
+                                (item) => item.couponId !== option.id
+                              );
+
+                              return value > 0
+                                ? [...remaining, {
+                                    couponId: option.id,
+                                    quantity: value,
+                                  }]
+                                : remaining;
+                            });
+                          }}
+                          className="w-20 rounded-lg border border-slate-300 px-2 py-2 text-center"
+                        />
+                      </label>
+                    </div>
+                  );
+                })}
+
+              {couponOptions.length === 0 && (
+                <p className="text-sm text-slate-500">
+                  尚未建立優惠券種類，請先至優惠券管理新增。
+                </p>
+              )}
+
+              {editLegacyCoupons.some(
+                (item) => !couponOptions.some(
+                  (option) => option.id === item.couponId
+                )
+              ) && (
+                <p className="text-sm text-red-600">
+                  此會員含有找不到對應設定的優惠券，請先確認資料。
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
         {editMessage && <p className="mt-5 text-sm text-red-600">{editMessage}</p>}
         <div className="mt-7 flex justify-end gap-3"><button type="button" onClick={() => setEditingMember(null)} disabled={isSavingEdit} className="rounded-xl border border-slate-300 px-5 py-3 font-semibold text-slate-700">取消</button><button type="button" onClick={saveEdit} disabled={isSavingEdit} className="rounded-xl bg-violet-600 px-6 py-3 font-semibold text-white disabled:opacity-50">{isSavingEdit ? "儲存中……" : "儲存修改"}</button></div>
       </div></div>}
@@ -320,7 +483,7 @@ export function AdminLegacyMemberManager() {
       {deletingMember && <div className="fixed inset-0 z-[310] flex items-center justify-center bg-slate-900/60 px-4"><div className="w-full max-w-md rounded-3xl bg-white p-7 shadow-2xl"><h3 className="text-xl font-bold text-slate-900">刪除待認領舊會員？</h3><p className="mt-3 text-sm leading-6 text-slate-600">即將刪除「{deletingMember.name}」的舊會員資料。只有尚未認領的資料可以刪除，此操作無法復原。</p><div className="mt-7 flex justify-end gap-3"><button type="button" onClick={() => setDeletingMember(null)} disabled={isDeleting} className="rounded-xl border border-slate-300 px-5 py-3 font-semibold text-slate-700">取消</button><button type="button" onClick={confirmDelete} disabled={isDeleting} className="rounded-xl bg-red-600 px-5 py-3 font-semibold text-white disabled:opacity-50">{isDeleting ? "刪除中……" : "確認刪除"}</button></div></div></div>}
 
       {showBatch && <div className="fixed inset-0 z-[320] flex items-center justify-center overflow-y-auto bg-slate-900/60 px-4 py-8"><div className="w-full max-w-3xl rounded-3xl bg-white p-7 shadow-2xl md:p-9"><div className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-600">Batch Import</p><h3 className="mt-2 text-2xl font-bold text-slate-900">批次新增舊會員</h3></div><button type="button" onClick={() => setShowBatch(false)} disabled={isBatchSaving} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600">關閉</button></div>
-        <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm leading-7 text-slate-600"><p className="font-semibold text-slate-800">每行一位，欄位用 Tab 或逗號分隔：</p><p>姓名, 手機, 生日, 課程點數, 紅利點數</p><p className="mt-2 font-mono text-xs">王小美,0912345678,1995/08/20,10,2</p><p className="font-mono text-xs">陳小華　0987654321　1992-03-05　5　0</p><p className="mt-2 text-xs">生日接受 YYYY/MM/DD、YYYY-MM-DD；紅利點數可省略，預設 0。</p></div>
+        <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm leading-7 text-slate-600"><p className="font-semibold text-slate-800">每行一位，欄位用 Tab 或逗號分隔：</p><p>姓名, 手機, 生日, 課程點數, 紅利點數, 歷史上課堂數, 剩餘優惠券</p><p className="mt-2 font-mono text-xs">王小美,0912345678,1995/08/20,10,2,35,紅利 8 折券*2|生日 7 折優惠券*1</p><p className="font-mono text-xs">陳小華　0987654321　1992-03-05　5　0</p><p className="mt-2 text-xs">生日接受 YYYY/MM/DD、YYYY-MM-DD；紅利點數及歷史上課堂數可省略，預設 0。歷史上課堂數請填入好手會員報表的「來店次數」。</p></div>
         <textarea value={batchText} onChange={(e) => setBatchText(e.target.value)} rows={12} placeholder="在這裡貼上舊系統會員資料……" className="mt-5 w-full rounded-2xl border border-slate-300 px-4 py-3 font-mono text-sm outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-100"/>
         {batchMessage && <pre className="mt-4 whitespace-pre-wrap rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">{batchMessage}</pre>}
         <div className="mt-6 flex flex-wrap justify-end gap-3">

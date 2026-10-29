@@ -9,6 +9,7 @@ import {
   adminAuth,
   adminDb,
 } from "@/lib/firebaseAdmin";
+import { sendWaitlistPush } from "@/lib/sendWaitlistPush";
 
 export const runtime = "nodejs";
 
@@ -297,6 +298,27 @@ export async function POST(request: NextRequest) {
           }
 
           await batch.commit();
+// 候補通知建立成功後，觸發推播。
+// 目前 FCM 安全鎖啟用，不會實際發送。
+for (const waitlistDoc of waitingDocs.slice(i, i + 200)) {
+  const waitlistUserId = waitlistDoc.data().userId;
+
+  if (typeof waitlistUserId !== "string" || !waitlistUserId) {
+    continue;
+  }
+
+  try {
+    await sendWaitlistPush(
+      waitlistUserId,
+      String(latestClass.courseName ?? "候補課程")
+    );
+  } catch (pushError) {
+    console.error(
+      "[Naya Push] 候補推播失敗：",
+      pushError
+    );
+  }
+}
         }
       }
     } catch (notificationError) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
+import { parseLegacyCoupons } from "@/lib/legacyCouponTransfer";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 
 async function requireAdmin(request: NextRequest) {
@@ -26,13 +27,17 @@ export async function POST(request: NextRequest) {
     const date = new Date(y, m - 1, d);
     if (!Number.isInteger(y) || y < 1900 || y > 2100 || date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) return NextResponse.json({ error: "生日格式不正確。" }, { status: 400 });
     if (!Number.isInteger(points) || points < 0 || !Number.isInteger(rewardPoints) || rewardPoints < 0) return NextResponse.json({ error: "點數必須是 0 以上整數。" }, { status: 400 });
+    // 未提供 coupons 時保留原資料；有提供時驗證優惠券格式。
+    const coupons = Object.prototype.hasOwnProperty.call(body, "coupons")
+      ? parseLegacyCoupons(body.coupons)
+      : undefined;
     const ref = adminDb.collection("legacyMembers").doc(id);
     await adminDb.runTransaction(async (tx) => {
       const [snap, duplicate] = await Promise.all([tx.get(ref), tx.get(adminDb.collection("legacyMembers").where("phoneNormalized", "==", phone))]);
       if (!snap.exists) throw new Error("NOT_FOUND");
       if (snap.data()?.status !== "unclaimed") throw new Error("LOCKED");
       if (duplicate.docs.some((doc) => doc.id !== id)) throw new Error("DUPLICATE_PHONE");
-      tx.update(ref, { name, phone, phoneNormalized: phone, birthdayYear: y, birthdayMonth: m, birthdayDay: d, points, rewardPoints, updatedAt: FieldValue.serverTimestamp() });
+      tx.update(ref, { name, phone, phoneNormalized: phone, birthdayYear: y, birthdayMonth: m, birthdayDay: d, points, rewardPoints, ...(coupons !== undefined ? { coupons } : {}), updatedAt: FieldValue.serverTimestamp() });
     });
     return NextResponse.json({ success: true });
   } catch (error) {

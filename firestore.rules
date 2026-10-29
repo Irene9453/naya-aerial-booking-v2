@@ -539,18 +539,6 @@ match /waitlists/{waitlistId} {
                                    resource.data.classId
                                  ).data.capacity
                        )
-
-                       ||
-
-                       // waiting → converted
-                       // 候補會員成功取得正式名額
-                       (
-                         resource.data.status
-                           == "waiting"
-
-                         && request.resource.data.status
-                           == "converted"
-                       )
                      )
                    );
 
@@ -594,12 +582,7 @@ match /waitlists/{waitlistId} {
                            == request.auth.uid
                        );
 
-      allow create: if isAdmin()
-                    || (
-                      isSignedIn()
-                      && request.resource.data.userId
-                        == request.auth.uid
-                    );
+      allow create: if isAdmin();
 
       allow update, delete:
         if false;
@@ -802,16 +785,8 @@ match /waitlists/{waitlistId} {
                            == request.auth.uid
                        );
 
-      allow create: if isAdmin()
-                    || (
-                      isSignedIn()
-                      && request.resource.data.userId
-                        == request.auth.uid
-                      && request.resource.data.status
-                        == "available"
-                      && request.resource.data.type
-                        == "reward"
-                    );
+      // 僅管理員可直接建立優惠券；後端 Admin SDK 不受此規則限制。
+      allow create: if isAdmin();
 
       allow update: if isAdmin();
 
@@ -844,5 +819,29 @@ match /waitlists/{waitlistId} {
       allow update, delete:
         if false;
     }
+
+    // =========================
+    // 生日優惠使用紀錄
+    // =========================
+    match /birthdayCouponUsage/{usageId} {
+
+      // 會員只能讀取自己的生日優惠紀錄
+      allow get: if isAdmin()
+        || (
+          isSignedIn()
+          && usageId.matches(
+            '^' + request.auth.uid + '_[0-9]{4}$'
+          )
+        );
+
+      // 僅管理員可列出、建立或更新紀錄
+      allow list: if isAdmin();
+
+      allow create, update: if isAdmin();
+
+      // 禁止刪除
+      allow delete: if false;
+    }
+
   }
 }

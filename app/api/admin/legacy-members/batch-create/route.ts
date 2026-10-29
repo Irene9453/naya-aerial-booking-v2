@@ -1,6 +1,120 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
-async function requireAdmin(request: NextRequest){const h=request.headers.get("authorization");if(!h?.startsWith("Bearer "))throw new Error("UNAUTHORIZED");const d=await adminAuth.verifyIdToken(h.slice(7));const u=await adminDb.collection("users").doc(d.uid).get();if(!u.exists||u.data()?.role!=="admin")throw new Error("FORBIDDEN");return d.uid;}
-function parseLine(line:string,index:number){const parts=line.includes("\t")?line.split("\t"):line.split(/\s*[,，]\s*/);if(parts.length<4)throw new Error(`第 ${index} 行：欄位不足`);const [nameRaw,phoneRaw,birthdayRaw,pointsRaw,rewardRaw="0",classesRaw="0"]=parts;const name=nameRaw.trim();const phone=phoneRaw.replace(/\D/g,"");const match=birthdayRaw.trim().match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);if(!name)throw new Error(`第 ${index} 行：姓名空白`);if(!/^09\d{8}$/.test(phone))throw new Error(`第 ${index} 行：手機格式錯誤`);if(!match)throw new Error(`第 ${index} 行：生日格式錯誤`);const y=Number(match[1]),m=Number(match[2]),d=Number(match[3]);const date=new Date(y,m-1,d);if(date.getFullYear()!==y||date.getMonth()!==m-1||date.getDate()!==d)throw new Error(`第 ${index} 行：生日不存在`);const points=Number(pointsRaw),rewardPoints=Number(rewardRaw||0);if(!Number.isInteger(points)||points<0||!Number.isInteger(rewardPoints)||rewardPoints<0)throw new Error(`第 ${index} 行：點數需為 0 以上整數`);const journeyLegacyClasses=Number(classesRaw);if(!Number.isSafeInteger(journeyLegacyClasses)||journeyLegacyClasses<0||journeyLegacyClasses>100000)throw new Error(`第 ${index} 行：歷史堂數需為 0～100000 的整數`);return{name,phone,birthdayYear:y,birthdayMonth:m,birthdayDay:d,points,rewardPoints,journeyLegacyClasses};}
-export async function POST(request:NextRequest){try{const adminUid=await requireAdmin(request);const body=await request.json();const text=String(body.text??"");const lines=text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);if(!lines.length)return NextResponse.json({error:"沒有可匯入的資料。"},{status:400});if(lines.length>200)return NextResponse.json({error:"一次最多批次新增 200 位會員。"},{status:400});let created=0,skipped=0;const errors:string[]=[];const seen=new Set<string>();for(let i=0;i<lines.length;i++){try{const row=parseLine(lines[i],i+1);if(seen.has(row.phone)){skipped++;errors.push(`第 ${i+1} 行：同批次手機重複`);continue;}seen.add(row.phone);const existing=await adminDb.collection("legacyMembers").where("phoneNormalized","==",row.phone).limit(1).get();if(!existing.empty){skipped++;errors.push(`第 ${i+1} 行：${row.phone} 已存在`);continue;}await adminDb.collection("legacyMembers").add({...row,phoneNormalized:row.phone,status:"unclaimed",createdBy:adminUid,createdAt:FieldValue.serverTimestamp()});created++;}catch(error){skipped++;errors.push(error instanceof Error?error.message:`第 ${i+1} 行：格式錯誤`);}}return NextResponse.json({success:true,created,skipped,errors});}catch(error){const m=error instanceof Error?error.message:"";console.error("批次新增舊會員失敗：",error);if(m==="UNAUTHORIZED")return NextResponse.json({error:"請先登入管理員帳號。"},{status:401});if(m==="FORBIDDEN")return NextResponse.json({error:"只有管理員可以批次新增。"},{status:403});return NextResponse.json({error:"批次新增失敗。"},{status:500});}}
+import {
+  getBatchLines,
+  loadCouponNames,
+  parseBatchMember,
+} from "@/lib/legacyBatchImport";
+
+export const runtime = "nodejs";
+
+async function requireAdmin(request: NextRequest) {
+  const authorization = request.headers.get("authorization");
+  if (!authorization?.startsWith("Bearer ")) throw new Error("UNAUTHORIZED");
+
+  const decoded = await adminAuth.verifyIdToken(authorization.slice(7));
+  const user = await adminDb.collection("users").doc(decoded.uid).get();
+
+  if (!user.exists || user.data()?.role !== "admin") {
+    throw new Error("FORBIDDEN");
+  }
+
+  return decoded.uid;
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const adminUid = await requireAdmin(request);
+    const body = await request.json();
+    const lines = getBatchLines(String(body.text ?? ""));
+
+    if (!lines.length) {
+      return NextResponse.json(
+        { error: "沒有可匯入的資料。" },
+        { status: 400 }
+      );
+    }
+
+    if (lines.length > 200) {
+      return NextResponse.json(
+        { error: "一次最多新增 200 位會員。" },
+        { status: 400 }
+      );
+    }
+
+    const couponNames = await loadCouponNames();
+
+    // 先驗證所有資料，避免優惠券錯誤造成部分會員已匯入。
+    const parsed = lines.map((line, index) =>
+      parseBatchMember(line, index + 1, couponNames)
+    );
+
+    const seen = new Set<string>();
+
+    for (const row of parsed) {
+      if (seen.has(row.phone)) {
+        return NextResponse.json(
+          { error: `同批次手機重複：${row.phone}` },
+          { status: 400 }
+        );
+      }
+      seen.add(row.phone);
+    }
+
+    let created = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (const row of parsed) {
+      const existing = await adminDb.collection("legacyMembers")
+        .where("phoneNormalized", "==", row.phone)
+        .limit(1)
+        .get();
+
+      if (!existing.empty) {
+        skipped++;
+        errors.push(`手機 ${row.phone} 已存在，略過`);
+        continue;
+      }
+
+      await adminDb.collection("legacyMembers").add({
+        ...row,
+        phoneNormalized: row.phone,
+        status: "unclaimed",
+        createdBy: adminUid,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+
+      created++;
+    }
+
+    return NextResponse.json({ success: true, created, skipped, errors });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    console.error("批次新增舊會員失敗：", error);
+
+    if (message === "UNAUTHORIZED") {
+      return NextResponse.json(
+        { error: "請先登入管理員帳號。" },
+        { status: 401 }
+      );
+    }
+    if (message === "FORBIDDEN") {
+      return NextResponse.json(
+        { error: "只有管理員可以批次新增。" },
+        { status: 403 }
+      );
+    }
+
+    // 格式錯誤直接回傳給管理員。
+    if (message.startsWith("第 ") || message.startsWith("INVALID_")) {
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
+
+    return NextResponse.json(
+      { error: "批次新增失敗，請檢查伺服器紀錄。" },
+      { status: 500 }
+    );
+  }
+}

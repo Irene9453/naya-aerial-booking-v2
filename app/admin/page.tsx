@@ -17,7 +17,8 @@ import AdminPackageManager from "@/components/AdminPackageManager";
 import StudentManager from "@/components/StudentManager";
 import ClassManager from "@/components/ClassManager";
 import AdminRevenueSummary from "@/components/AdminRevenueSummary";
-import AdminInitializeCoupons from "@/components/AdminInitializeCoupons";
+import AdminCouponManager from "@/components/AdminCouponManager";
+import AdminCouponGiftManager from "@/components/AdminCouponGiftManager";
 import AdminPurchaseRequests from "@/components/AdminPurchaseRequests";
 import AdminSpecialLeaveManager from "@/components/AdminSpecialLeaveManager";
 import MovementLibrary from "@/components/MovementLibrary";
@@ -322,7 +323,8 @@ allowMonthlyBooking: Boolean(
 <AdminPackageManager />
 
 {/* 優惠管理 */}
-<AdminInitializeCoupons />
+<AdminCouponManager />
+      <AdminCouponGiftManager />
 
 {/* 收入統計 */}
 <AdminRevenueSummary />
