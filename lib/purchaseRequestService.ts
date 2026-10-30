@@ -106,10 +106,6 @@ export async function completePurchaseRequest({
         requestData.packageId ?? ""
       );
 
-      const packageName = String(
-        requestData.packageName ?? ""
-      );
-
       if (!userId) {
         throw new Error(
           "購買申請缺少會員資料"
@@ -131,167 +127,175 @@ export async function completePurchaseRequest({
         );
       }
 
-      const userData =
-        userSnapshot.data();
-       
+
+const userData = userSnapshot.data();
 
       // =========================
-      // 5. 取得課卡與價格資料
+      // 5. 後端重新驗證課卡與價格
       // =========================
 
-      const currentPoints = Number(
-        userData.points ?? 0
+      const packageRef = doc(
+        db,
+        "packages",
+        packageId
       );
 
-      const packagePoints = Number(
-        requestData.packagePoints ?? 0
-      );
+      const packageSnapshot =
+        await transaction.get(packageRef);
 
-      const finalPrice = Number(
-        requestData.finalPrice ?? 0
-      );
+      if (!packageSnapshot.exists()) {
+        throw new Error("找不到課卡商品");
+      }
 
-      const originalPrice = Number(
-        requestData.originalPrice ??
-          finalPrice
-      );
+      const packageData = packageSnapshot.data();
 
-      const discountAmount = Number(
-        requestData.discountAmount ?? 0
-      );
+      if (packageData.isActive !== true) {
+        throw new Error("此課卡目前已停用");
+      }
 
-      if (
-        !Number.isInteger(packagePoints) ||
-        packagePoints <= 0
-      ) {
-        throw new Error(
-          "課卡點數資料不正確"
-        );
+      const currentPoints = Number(userData.points ?? 0);
+      const packagePoints = Number(packageData.points ?? 0);
+      const originalPrice = Number(packageData.price ?? 0);
+      const packageName = String(packageData.name ?? "");
+
+      if (!Number.isSafeInteger(currentPoints) || currentPoints < 0) {
+        throw new Error("會員點數資料不正確");
+      }
+      if (!Number.isSafeInteger(packagePoints) || packagePoints <= 0) {
+        throw new Error("課卡點數資料不正確");
+      }
+      if (!Number.isSafeInteger(originalPrice) || originalPrice < 0) {
+        throw new Error("課卡價格資料不正確");
       }
 
       if (
-        finalPrice < 0 ||
-        originalPrice < 0 ||
-        discountAmount < 0
+        Number(requestData.packagePoints) !== packagePoints ||
+        String(requestData.packageName ?? "") !== packageName
       ) {
-        throw new Error(
-          "訂單價格資料不正確"
-        );
+        throw new Error("購買申請的課卡資料已變更，請重新建立申請");
       }
 
-      const newPointBalance =
-        currentPoints + packagePoints;
-
       // =========================
-      // 6. 優惠券資料
+      // 6. 驗證優惠券與訂單金額
       // =========================
 
-      const couponSource = String(
-        requestData.couponSource ?? ""
+      const couponSource = String(requestData.couponSource ?? "");
+      const couponId = String(requestData.couponId ?? "");
+      const couponCode = String(requestData.couponCode ?? "");
+      const couponName = String(requestData.couponName ?? "");
+
+      let verifiedDiscountRate = 1;
+      let birthdayUseRef: ReturnType<typeof doc> | null = null;
+      let userCouponRef: ReturnType<typeof doc> | null = null;
+
+      const taipeiNow = new Date();
+      const currentTaipeiYear = Number(
+        new Intl.DateTimeFormat("en", {
+          timeZone: "Asia/Taipei",
+          year: "numeric",
+        }).format(taipeiNow)
+      );
+      const currentTaipeiMonth = Number(
+        new Intl.DateTimeFormat("en", {
+          timeZone: "Asia/Taipei",
+          month: "numeric",
+        }).format(taipeiNow)
       );
 
-      const couponId = String(
-        requestData.couponId ?? ""
-      );
-
-      const couponCode = String(
-        requestData.couponCode ?? ""
-      );
-
-      const couponName = String(
-        requestData.couponName ?? ""
-      );
- // =========================
-// 驗證生日優惠資格
-// =========================
-
-if (couponSource === "birthday") {
-  const birthdayMonth = Number(
-    userData.birthdayMonth ?? 0
-  );
-
-  const currentTaipeiMonth = Number(
-    new Intl.DateTimeFormat("en", {
-      timeZone: "Asia/Taipei",
-      month: "numeric",
-    }).format(new Date())
-  );
-
-  if (!birthdayMonth) {
-    throw new Error(
-      "此會員尚未設定生日資料，無法使用生日優惠。"
-    );
-  }
-
-  if (birthdayMonth !== currentTaipeiMonth) {
-    throw new Error(
-      "經系統驗證，目前不是此會員的生日月份，無法使用生日 7 折優惠。"
-    );
-  }
-}
-      /*
-       * 如果使用的是紅利兌換優惠券，
-       * 必須先讀取 userCoupons。
-       *
-       * 注意：
-       * Firestore transaction 的資料讀取
-       * 必須在開始 update/set 前完成。
-       */
-
-      let userCouponRef:
-        | ReturnType<typeof doc>
-        | null = null;
-
-      if (
-        couponSource ===
-        "user_coupon"
-      ) {
-        if (!couponId) {
-          throw new Error(
-            "優惠券資料不完整"
-          );
+      if (couponSource === "birthday") {
+        const birthdayMonth = Number(userData.birthdayMonth ?? 0);
+        if (!birthdayMonth) {
+          throw new Error("此會員尚未設定生日資料，無法使用生日優惠。");
+        }
+        if (birthdayMonth !== currentTaipeiMonth) {
+          throw new Error("目前不是此會員的生日月份，無法使用生日 7 折優惠。");
         }
 
-        userCouponRef = doc(
+        birthdayUseRef = doc(
           db,
-          "userCoupons",
-          couponId
+          "birthdayCouponUsage",
+          `${userId}_${currentTaipeiYear}`
         );
-
-        const userCouponSnapshot =
-          await transaction.get(
-            userCouponRef
-          );
-
-        if (
-          !userCouponSnapshot.exists()
-        ) {
-          throw new Error(
-            "找不到此優惠券"
-          );
+        const birthdayUseSnapshot = await transaction.get(birthdayUseRef);
+        if (birthdayUseSnapshot.exists()) {
+          throw new Error("此會員今年已使用過生日 7 折優惠。");
+        }
+        verifiedDiscountRate = 0.7;
+      } else if (couponSource === "new_student") {
+        if (userData.isNewStudent !== true) {
+          throw new Error("此會員不符合新生優惠資格");
         }
 
-        const userCouponData =
-          userCouponSnapshot.data();
-
-        if (
-          String(
-            userCouponData.userId ?? ""
-          ) !== userId
-        ) {
-          throw new Error(
-            "此優惠券不屬於該會員"
-          );
+        verifiedDiscountRate = packagePoints >= 25 ? 0.85 : 0.9;
+        const expectedCouponCode = packagePoints >= 25
+          ? "new_student_85"
+          : "new_student_90";
+        if (couponCode !== expectedCouponCode) {
+          throw new Error("新生優惠與課卡點數不符，請重新建立購買申請");
+        }
+      } else if (couponSource === "user_coupon") {
+        if (!couponId) {
+          throw new Error("優惠券資料不完整");
         }
 
-        if (
-          userCouponData.status !==
-          "available"
-        ) {
-          throw new Error(
-            "此優惠券已使用或目前無法使用"
-          );
+        userCouponRef = doc(db, "userCoupons", couponId);
+        const userCouponSnapshot = await transaction.get(userCouponRef);
+        if (!userCouponSnapshot.exists()) {
+          throw new Error("找不到此優惠券");
         }
+
+        const userCouponData = userCouponSnapshot.data();
+        if (String(userCouponData.userId ?? "") !== userId) {
+          throw new Error("此優惠券不屬於該會員");
+        }
+        if (userCouponData.status !== "available") {
+          throw new Error("此優惠券已使用或目前無法使用");
+        }
+
+        const minimumPackagePoints = Number(userCouponData.minimumPackagePoints ?? 0);
+        const maximumPackagePoints = userCouponData.maximumPackagePoints == null
+          ? null
+          : Number(userCouponData.maximumPackagePoints);
+
+        if (!Number.isFinite(minimumPackagePoints) || packagePoints < minimumPackagePoints) {
+          throw new Error("此優惠券不適用於所選課卡");
+        }
+        if (
+          maximumPackagePoints !== null &&
+          (!Number.isFinite(maximumPackagePoints) || packagePoints > maximumPackagePoints)
+        ) {
+          throw new Error("此優惠券不適用於所選課卡");
+        }
+
+        verifiedDiscountRate = Number(userCouponData.discountRate);
+        if (
+          !Number.isFinite(verifiedDiscountRate) ||
+          verifiedDiscountRate <= 0 ||
+          verifiedDiscountRate > 1
+        ) {
+          throw new Error("優惠券折扣設定不正確");
+        }
+      } else if (couponSource !== "") {
+        throw new Error("不支援的優惠券類型");
+      }
+
+      const discountAmount = Math.round(
+        originalPrice * (1 - verifiedDiscountRate)
+      );
+      const finalPrice = originalPrice - discountAmount;
+
+      // 不接受前端自行修改價格或折扣金額
+      if (
+        Number(requestData.originalPrice) !== originalPrice ||
+        Number(requestData.discountAmount) !== discountAmount ||
+        Number(requestData.finalPrice) !== finalPrice
+      ) {
+        throw new Error("訂單金額與系統計算結果不一致，請重新建立購買申請");
+      }
+
+      const newPointBalance = currentPoints + packagePoints;
+      if (!Number.isSafeInteger(newPointBalance)) {
+        throw new Error("會員點數超出可處理範圍");
       }
 
       // =========================
@@ -342,10 +346,26 @@ if (couponSource === "birthday") {
           false;
       }
 
-      transaction.update(
-        userRef,
-        userUpdates
-      );
+      if (birthdayUseRef) {
+  transaction.set(birthdayUseRef, {
+    userId,
+    year: Number(
+      new Intl.DateTimeFormat("en", {
+        timeZone: "Asia/Taipei",
+        year: "numeric",
+      }).format(new Date())
+    ),
+    requestId,
+    couponSource: "birthday",
+    discountRate: 0.7,
+    usedAt: serverTimestamp(),
+  });
+}
+
+transaction.update(
+  userRef,
+  userUpdates
+);
 
       // =========================
       // 9. 核銷紅利優惠券

@@ -10,6 +10,8 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import type { StudentData } from "@/components/StudentManager";
+import AddStudentLessonRecord from "@/components/AddStudentLessonRecord";
+import EditStudentLessonRecord from "@/components/EditStudentLessonRecord";
 
 type StudentDetailModalProps = {
   student: StudentData;
@@ -23,6 +25,16 @@ type BookingRecord = {
   pointsUsed: number;
   pointsRefunded: number;
   status: string;
+  createdAt: Timestamp | null;
+};
+type LessonRecord = {
+  id: string;
+  studentId: string;
+  classId: string;
+  courseName: string;
+  classStartTime: Timestamp | null;
+  lessonContent: string;
+  source: string;
   createdAt: Timestamp | null;
 };
 
@@ -58,6 +70,7 @@ type RewardTransactionRecord = {
 
 type TabType =
   | "bookings"
+  | "lessons"
   | "packages"
   | "points"
   | "rewards";
@@ -171,6 +184,9 @@ export default function StudentDetailModal({
     BookingRecord[]
   >([]);
 
+  const [lessonRecords, setLessonRecords] =
+  useState<LessonRecord[]>([]);
+
   const [packageSales, setPackageSales] = useState<
     PackageSaleRecord[]
   >([]);
@@ -185,28 +201,26 @@ export default function StudentDetailModal({
     setRewardTransactions,
   ] = useState<RewardTransactionRecord[]>([]);
 
-  const [isLoading, setIsLoading] =
-    useState(true);
+  const [, setIsLoading] = useState(true);
 
-  const [message, setMessage] =
-    useState("");
+const [, setMessage] = useState("");
 
-  useEffect(() => {
-    setIsLoading(true);
-    setMessage("");
+useEffect(() => {
 
-    let loadedBookings = false;
-    let loadedPackages = false;
-    let loadedPoints = false;
-    let loadedRewards = false;
+   let loadedBookings = false;
+let loadedLessons = false;
+let loadedPackages = false;
+let loadedPoints = false;
+let loadedRewards = false;
 
     function checkLoading() {
       if (
-        loadedBookings &&
-        loadedPackages &&
-        loadedPoints &&
-        loadedRewards
-      ) {
+  loadedBookings &&
+  loadedLessons &&
+  loadedPackages &&
+  loadedPoints &&
+  loadedRewards
+) {
         setIsLoading(false);
       }
     }
@@ -280,7 +294,85 @@ export default function StudentDetailModal({
         checkLoading();
       }
     );
+// =========================
+// 動作 / 上課內容紀錄
+// =========================
 
+const lessonRecordsQuery = query(
+  collection(db, "studentLessonRecords"),
+  where("studentId", "==", student.id)
+);
+
+const unsubscribeLessonRecords =
+  onSnapshot(
+    lessonRecordsQuery,
+    (snapshot) => {
+      const nextRecords =
+        snapshot.docs
+          .map((recordDocument) => {
+            const data =
+              recordDocument.data();
+
+            return {
+              id: recordDocument.id,
+
+              studentId: String(
+                data.studentId ?? ""
+              ),
+
+              classId: String(
+                data.classId ?? ""
+              ),
+
+              courseName: String(
+                data.courseName ?? ""
+              ),
+
+              classStartTime:
+                data.classStartTime instanceof Timestamp
+                  ? data.classStartTime
+                  : null,
+
+              lessonContent: String(
+                data.lessonContent ?? ""
+              ),
+
+              source: String(
+                data.source ?? ""
+              ),
+
+              createdAt:
+                data.createdAt instanceof Timestamp
+                  ? data.createdAt
+                  : null,
+            };
+          })
+          .sort(
+            (first, second) =>
+              timestampToMillis(
+                second.classStartTime
+              ) -
+              timestampToMillis(
+                first.classStartTime
+              )
+          );
+
+      setLessonRecords(nextRecords);
+
+      loadedLessons = true;
+      checkLoading();
+    },
+    (error) => {
+      console.error(error);
+
+      setMessage(
+        "讀取動作紀錄失敗。"
+      );
+
+      loadedLessons = true;
+      checkLoading();
+    }
+  );
     // =========================
     // 課卡購買紀錄
     // packageSales 使用 studentId
@@ -496,11 +588,12 @@ export default function StudentDetailModal({
     );
 
     return () => {
-      unsubscribeBookings();
-      unsubscribePackageSales();
-      unsubscribePoints();
-      unsubscribeRewards();
-    };
+  unsubscribeBookings();
+  unsubscribeLessonRecords();
+  unsubscribePackageSales();
+  unsubscribePoints();
+  unsubscribeRewards();
+};
   }, [student.id]);
 
   return (
@@ -565,143 +658,204 @@ export default function StudentDetailModal({
         </div>
 
         {/* Tabs */}
-        <div className="mt-7 flex gap-2 overflow-x-auto border-b border-slate-200 pb-3">
-          <button
-            type="button"
-            onClick={() =>
-              setActiveTab("bookings")
-            }
-            className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold ${
-              activeTab === "bookings"
-                ? "bg-sky-600 text-white"
-                : "bg-slate-100 text-slate-600"
-            }`}
+<div className="mt-7 flex gap-2 overflow-x-auto border-b border-slate-200 pb-3">
+  <button
+    type="button"
+    onClick={() =>
+      setActiveTab("bookings")
+    }
+    className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold ${
+      activeTab === "bookings"
+        ? "bg-sky-600 text-white"
+        : "bg-slate-100 text-slate-600"
+    }`}
+  >
+    上課紀錄 ({bookings.length})
+  </button>
+
+  <button
+    type="button"
+    onClick={() =>
+      setActiveTab("lessons")
+    }
+    className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold ${
+      activeTab === "lessons"
+        ? "bg-violet-600 text-white"
+        : "bg-slate-100 text-slate-600"
+    }`}
+  >
+    動作紀錄 ({lessonRecords.length})
+  </button>
+
+  <button
+    type="button"
+    onClick={() =>
+      setActiveTab("packages")
+    }
+    className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold ${
+      activeTab === "packages"
+        ? "bg-sky-600 text-white"
+        : "bg-slate-100 text-slate-600"
+    }`}
+  >
+    課卡購買 ({packageSales.length})
+  </button>
+
+  <button
+    type="button"
+    onClick={() =>
+      setActiveTab("points")
+    }
+    className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold ${
+      activeTab === "points"
+        ? "bg-sky-600 text-white"
+        : "bg-slate-100 text-slate-600"
+    }`}
+  >
+    點數異動 ({pointTransactions.length})
+  </button>
+
+  <button
+    type="button"
+    onClick={() =>
+      setActiveTab("rewards")
+    }
+    className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold ${
+      activeTab === "rewards"
+        ? "bg-sky-600 text-white"
+        : "bg-slate-100 text-slate-600"
+    }`}
+  >
+    紅利紀錄 ({rewardTransactions.length})
+  </button>
+</div>
+{/* 上課紀錄 */}
+{activeTab === "bookings" && (
+  <>
+    {bookings.length === 0 ? (
+      <div className="mt-6 rounded-2xl bg-slate-50 px-5 py-8 text-center text-slate-500">
+        尚無上課紀錄。
+      </div>
+    ) : (
+      <div className="mt-6 space-y-3">
+        {bookings.map((booking) => (
+          <div
+            key={booking.id}
+            className="rounded-2xl border border-slate-200 p-5"
           >
-            上課紀錄 ({bookings.length})
-          </button>
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="font-bold text-slate-900">
+                  {booking.courseName || "課程"}
+                </p>
 
-          <button
-            type="button"
-            onClick={() =>
-              setActiveTab("packages")
-            }
-            className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold ${
-              activeTab === "packages"
-                ? "bg-sky-600 text-white"
-                : "bg-slate-100 text-slate-600"
-            }`}
-          >
-            課卡購買 ({packageSales.length})
-          </button>
+                <p className="mt-1 text-sm text-slate-500">
+                  {formatDateTime(
+                    booking.classStartTime
+                  )}
+                </p>
+              </div>
 
-          <button
-            type="button"
-            onClick={() =>
-              setActiveTab("points")
-            }
-            className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold ${
-              activeTab === "points"
-                ? "bg-sky-600 text-white"
-                : "bg-slate-100 text-slate-600"
-            }`}
-          >
-            點數異動 ({pointTransactions.length})
-          </button>
-
-          <button
-            type="button"
-            onClick={() =>
-              setActiveTab("rewards")
-            }
-            className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold ${
-              activeTab === "rewards"
-                ? "bg-sky-600 text-white"
-                : "bg-slate-100 text-slate-600"
-            }`}
-          >
-            紅利紀錄 ({rewardTransactions.length})
-          </button>
-        </div>
-
-        {message && (
-          <p className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">
-            {message}
-          </p>
-        )}
-
-        {isLoading ? (
-          <p className="py-12 text-center text-slate-500">
-            會員紀錄載入中……
-          </p>
-        ) : (
-          <div className="mt-6">
-            {/* 上課紀錄 */}
-            {activeTab === "bookings" && (
-              <>
-                {bookings.length === 0 ? (
-                  <div className="rounded-2xl bg-slate-50 px-5 py-8 text-center text-slate-500">
-                    尚無上課或預約紀錄。
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {bookings.map((booking) => (
-                      <div
-                        key={booking.id}
-                        className="rounded-2xl border border-slate-200 p-5"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-4">
-                          <div>
-                            <p className="font-bold text-slate-900">
-                              {booking.courseName ||
-                                "課程"}
-                            </p>
-
-                            <p className="mt-1 text-sm text-slate-500">
-                              {formatDateTime(
-                                booking.classStartTime
-                              )}
-                            </p>
-                          </div>
-
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                              booking.status ===
-                              "booked"
-                                ? "bg-sky-50 text-sky-700"
-                                : booking.status ===
-                                    "special_leave"
-                                  ? "bg-amber-50 text-amber-700"
-                                  : booking.status ===
-                                      "cancelled"
-                                    ? "bg-slate-100 text-slate-600"
-                                    : "bg-emerald-50 text-emerald-700"
-                            }`}
-                          >
-                            {getBookingStatusLabel(
-                              booking.status
-                            )}
-                          </span>
-                        </div>
-
-                        <div className="mt-4 flex flex-wrap gap-5 text-sm text-slate-600">
-                          <span>
-                            使用：{booking.pointsUsed} 點
-                          </span>
-
-                          {booking.pointsRefunded > 0 && (
-                            <span className="font-semibold text-emerald-700">
-                              退回：
-                              {booking.pointsRefunded} 點
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+              <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
+                {getBookingStatusLabel(
+                  booking.status
                 )}
-              </>
-            )}
+              </span>
+            </div>
 
+            <div className="mt-4 flex flex-wrap gap-4 text-sm text-slate-600">
+              <span>
+                使用 {booking.pointsUsed} 點
+              </span>
+
+              {booking.pointsRefunded > 0 && (
+                <span className="text-emerald-700">
+                  退還 {booking.pointsRefunded} 點
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+  </>
+)}
+
+{/* 動作紀錄 */}
+{activeTab === "lessons" && (
+  <div className="mt-6">
+    <div className="mb-5 flex items-center justify-between gap-4">
+      <div>
+        <h3 className="font-bold text-slate-900">
+          動作紀錄
+        </h3>
+
+        <p className="mt-1 text-sm text-slate-500">
+          共 {lessonRecords.length} 筆紀錄
+        </p>
+      </div>
+
+      <AddStudentLessonRecord
+        studentId={student.id}
+      />
+    </div>
+
+    {lessonRecords.length === 0 ? (
+      <div className="rounded-2xl bg-slate-50 px-5 py-8 text-center text-slate-500">
+        尚無動作紀錄。
+      </div>
+    ) : (
+      <div className="space-y-3">
+        {lessonRecords.map((record) => (
+  <div
+    key={record.id}
+    className="rounded-2xl border border-violet-100 bg-violet-50/40 p-5"
+  >
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <p className="font-bold text-slate-900">
+          {record.courseName || "課程"}
+        </p>
+
+        <p className="mt-1 text-sm text-slate-500">
+          {formatDateTime(
+            record.classStartTime
+          )}
+        </p>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
+          {record.source === "manual"
+            ? "歷史補登"
+            : "上課紀錄"}
+        </span>
+
+        <EditStudentLessonRecord
+          recordId={record.id}
+          courseName={record.courseName}
+          lessonContent={record.lessonContent}
+          classStartTime={record.classStartTime}
+          source={record.source}
+        />
+      </div>
+    </div>
+
+    <div className="mt-4 rounded-xl bg-white p-4">
+      <p className="text-xs font-semibold text-slate-400">
+        本堂內容
+      </p>
+
+      <p className="mt-2 font-semibold leading-7 text-violet-800">
+        {record.lessonContent || "未記錄"}
+      </p>
+    </div>
+  </div>
+))}
+      </div>
+    )}
+  </div>
+)}
             {/* 課卡購買 */}
             {activeTab === "packages" && (
               <>
@@ -897,8 +1051,6 @@ export default function StudentDetailModal({
               </>
             )}
           </div>
-        )}
       </div>
-    </div>
   );
 }

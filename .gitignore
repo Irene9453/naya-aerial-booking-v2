@@ -39,3 +39,25 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Naya Aerial - local development backups
+*.backup.txt
+*.location-backup.tsx
+*.address-backup.txt
+*.layout-backup.txt
+*.before-emulator.ts
+*.before-start.ps1
+*.before-*.rules
+*.safe.rules
+*.before-*.json
+firebaseAdmin.backup-*.txt
+.gitignore.backup.txt
+
+# Firebase emulator debug logs
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+database-debug.log*
+
+
+*.location-backup.txt

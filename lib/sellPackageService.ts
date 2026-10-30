@@ -1,133 +1,75 @@
-import {
-  doc,
-  runTransaction,
-  serverTimestamp,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase";
+
+import { auth } from "@/lib/firebase";
 
 type SellPackageParams = {
   adminId: string;
   studentId: string;
   packageId: string;
+  operationId: string;
 };
 
 export async function sellPackage({
   adminId,
   studentId,
   packageId,
+  operationId,
 }: SellPackageParams) {
-  const adminRef = doc(db, "users", adminId);
-  const studentRef = doc(db, "users", studentId);
-  const packageRef = doc(db, "packages", packageId);
+  const currentUser = auth.currentUser;
 
-  const operationId = `${Date.now()}_${crypto.randomUUID()}`;
+  if (!currentUser) {
+    throw new Error("請先登入管理員帳號");
+  }
 
-  const saleRef = doc(
-    db,
-    "packageSales",
-    `sale_${studentId}_${operationId}`
-  );
+  if (currentUser.uid !== adminId) {
+    throw new Error("管理員身分不符");
+  }
 
-  const pointTransactionRef = doc(
-    db,
-    "pointTransactions",
-    `package_${studentId}_${operationId}`
-  );
+  const idToken = await currentUser.getIdToken();
 
-  const notificationRef = doc(
-    db,
-    "notifications",
-    `package_${studentId}_${operationId}`
-  );
+  let response: Response;
 
-  return runTransaction(db, async (transaction) => {
-    const adminSnapshot = await transaction.get(adminRef);
-    const studentSnapshot = await transaction.get(studentRef);
-    const packageSnapshot = await transaction.get(packageRef);
-
-    if (!adminSnapshot.exists()) {
-      throw new Error("找不到管理員資料");
-    }
-
-    if (adminSnapshot.data().role !== "admin") {
-      throw new Error("你沒有管理員權限");
-    }
-
-    if (!studentSnapshot.exists()) {
-      throw new Error("找不到學生資料");
-    }
-
-    if (!packageSnapshot.exists()) {
-      throw new Error("找不到課卡商品");
-    }
-
-    const studentData = studentSnapshot.data();
-    const packageData = packageSnapshot.data();
-
-    if (packageData.isActive !== true) {
-      throw new Error("這張課卡目前已停用");
-    }
-
-    const currentPoints = Number(studentData.points ?? 0);
-    const packagePoints = Number(packageData.points ?? 0);
-    const packagePrice = Number(packageData.price ?? 0);
-    const packageName = String(packageData.name ?? "");
-
-    if (!Number.isInteger(packagePoints) || packagePoints <= 0) {
-      throw new Error("課卡點數設定不正確");
-    }
-
-    if (!Number.isInteger(packagePrice) || packagePrice < 0) {
-      throw new Error("課卡價格設定不正確");
-    }
-
-    const newBalance = currentPoints + packagePoints;
-
-    transaction.update(studentRef, {
-      points: newBalance,
+  try {
+    response = await fetch("/api/admin/packages/sell", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
+        studentId,
+        packageId,
+        operationId,
+      }),
     });
+  } catch {
+    throw new Error(
+      "無法確認課卡銷售結果，請使用原本的操作重試，不要重新建立銷售。"
+    );
+  }
 
-    transaction.set(saleRef, {
-      adminId,
-      studentId,
-      packageId,
-      packageName,
-      points: packagePoints,
-      price: packagePrice,
-      status: "completed",
-      createdAt: serverTimestamp(),
-    });
+  const contentType =
+    response.headers.get("content-type") ?? "";
 
-    transaction.set(pointTransactionRef, {
-      userId: studentId,
-      adminId,
-      packageId,
-      packageName,
-      type: "package_purchase",
-      amount: packagePoints,
-      note: `購買 ${packageName}`,
-      balanceAfter: newBalance,
-      createdAt: serverTimestamp(),
-    });
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      "無法確認課卡銷售結果，請使用原本的操作重試。"
+    );
+  }
 
-    transaction.set(notificationRef, {
-      userId: studentId,
-      type: "package_purchase",
-      title: "課卡購買成功",
-      body: `已購買 ${packageName}，增加 ${packagePoints} 點。目前共有 ${newBalance} 點。`,
-      packageId,
-      packageName,
-      pointsAdded: packagePoints,
-      price: packagePrice,
-      isRead: false,
-      createdAt: serverTimestamp(),
-    });
+  const data = await response.json();
 
-    return {
-      packageName,
-      packagePoints,
-      packagePrice,
-      newBalance,
-    };
-  });
+  if (!response.ok) {
+    throw new Error(
+      data.error ?? "課卡販售失敗，請稍後再試。"
+    );
+  }
+
+  return {
+    packageName: data.packageName as string,
+    packagePoints: data.packagePoints as number,
+    packagePrice: data.packagePrice as number,
+    newBalance: data.newBalance as number,
+    saleId: data.saleId as string,
+    alreadyProcessed: data.alreadyProcessed as boolean,
+  };
 }

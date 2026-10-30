@@ -1,16 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import {
-  doc,
-  runTransaction,
-  serverTimestamp,
-} from "firebase/firestore";
+import { useEffect, useState } from "react";
+import { collection, doc, getDocs, query, runTransaction, serverTimestamp, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 import AdminPointButton from "@/components/AdminPointButton";
 import SellPackageButton from "@/components/SellPackageButton";
 import StudentDetailModal from "@/components/StudentDetailModal";
+import ExportStudentLessonRecordsButton from "@/components/ExportStudentLessonRecordsButton";
+import AddLegacyStudentButton from "@/components/AddLegacyStudentButton";
+import StudentJourneyModal from "@/components/StudentJourneyModal";
 
 export type StudentData = {
   id: string;
@@ -23,6 +22,7 @@ export type StudentData = {
 
   points: number;
   rewardPoints: number;
+journeyLegacyClasses?: number;
 
   birthdayYear: number;
   birthdayMonth: number;
@@ -69,8 +69,84 @@ function formatBirthday(student: StudentData) {
 export default function StudentManager({
   students,
 }: StudentManagerProps) {
+
+  const [journeyStudent, setJourneyStudent] =
+  useState<StudentData | null>(null);
   const [searchText, setSearchText] =
     useState("");
+  // NAYA_COUPON_AVAILABLE_COUNTS
+  const [couponCounts, setCouponCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCouponCounts() {
+      try {
+        const snapshot = await getDocs(collection(db, "userCoupons"));
+        const counts: Record<string, number> = {};
+
+        for (const item of snapshot.docs) {
+          const data = item.data();
+
+          if (
+            data.status === "available" &&
+            typeof data.userId === "string"
+          ) {
+            counts[data.userId] = (counts[data.userId] ?? 0) + 1;
+          }
+        }
+
+        if (!cancelled) {
+          setCouponCounts(counts);
+        }
+      } catch (error) {
+        console.error("載入會員優惠券張數失敗：", error);
+      }
+    }
+
+    void loadCouponCounts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [students]);
+  // NAYA_MEMBER_COUPON_COLUMN
+  const [couponStudent, setCouponStudent] = useState<StudentData | null>(null);
+  const [memberCoupons, setMemberCoupons] = useState<Record<string, unknown>[]>([]);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState("");
+
+  async function openMemberCoupons(student: StudentData) {
+    setCouponStudent(student);
+    setMemberCoupons([]);
+    setCouponError("");
+    setCouponLoading(true);
+
+    try {
+      const couponQuery = query(
+        collection(db, "userCoupons"),
+        where("userId", "==", student.id)
+      );
+
+      const snapshot = await getDocs(couponQuery);
+
+      setMemberCoupons(
+        snapshot.docs.map((item) => ({
+          id: item.id,
+          ...item.data(),
+        })) as Record<string, unknown>[]
+      );
+    } catch (error: unknown) {
+      console.error("讀取會員優惠券失敗", error);
+      setCouponError(
+        error instanceof Error
+          ? error.message
+          : "讀取失敗，請確認 Firebase 權限。"
+      );
+    } finally {
+      setCouponLoading(false);
+    }
+  }
 
   const [filterType, setFilterType] =
     useState<
@@ -531,28 +607,35 @@ phone:
   <>
     <article className="mt-8 rounded-3xl bg-white p-7 shadow-sm md:p-9">
       {/* 標題 */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-600">
-            Students
-          </p>
+<div className="flex flex-wrap items-center justify-between gap-4">
+  <div>
+    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-600">
+      Students
+    </p>
 
-          <h2 className="mt-2 text-2xl font-bold text-slate-900">
-            會員與點數
-          </h2>
+    <h2 className="mt-2 text-2xl font-bold text-slate-900">
+      會員與點數
+    </h2>
 
-          <p className="mt-2 text-sm text-slate-500">
-            目前共有{" "}
-            {
-              students.filter(
-                (student) =>
-                  student.role === "student"
-              ).length
-            }{" "}
-            位學生
-          </p>
-        </div>
-      </div>
+    <p className="mt-2 text-sm text-slate-500">
+      目前共有{" "}
+      {
+        students.filter(
+          (student) =>
+            student.role ===
+            "student"
+        ).length
+      }{" "}
+      位學生
+    </p>
+  </div>
+
+  <div className="flex flex-wrap gap-3">
+    <AddLegacyStudentButton />
+
+    <ExportStudentLessonRecordsButton />
+  </div>
+</div>
 
       {/* 搜尋與篩選 */}
       <div className="mt-7 rounded-2xl bg-slate-50 p-5">
@@ -702,6 +785,9 @@ phone:
                 <th className="px-4 py-3 text-right font-semibold">
                   紅利
                 </th>
+                <th className="px-4 py-3 text-center font-semibold">
+                  優惠券
+                </th>
 
                 <th className="px-4 py-3 text-right font-semibold">
                   操作
@@ -751,6 +837,16 @@ phone:
                   <td className="px-4 py-4 text-right font-semibold text-amber-600">
                     {student.rewardPoints ?? 0}
                   </td>
+                  {/* NAYA_MEMBER_COUPON_COLUMN */}
+                  <td className="px-4 py-4 text-center whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => void openMemberCoupons(student)}
+                      className="rounded-xl border border-pink-300 px-3 py-2 text-sm font-semibold text-pink-700 hover:bg-pink-50"
+                    >
+                      可用 {couponCounts[student.id] ?? 0} 張｜查看優惠券
+                    </button>
+                  </td>
 
                   <td className="px-4 py-4">
                     <div className="flex min-w-max justify-end gap-2">
@@ -775,7 +871,13 @@ phone:
                       >
                         編輯會員
                       </button>
-
+<button
+  type="button"
+  onClick={() => setJourneyStudent(student)}
+  className="rounded-xl border border-sky-300 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-50"
+>
+  🪽 空中旅程
+</button>
                       <SellPackageButton
                         studentId={student.id}
                         studentName={student.name}
@@ -802,13 +904,10 @@ phone:
     {viewingStudent && (
       <StudentDetailModal
         student={viewingStudent}
-        onClose={() =>
-          setViewingStudent(null)
-        }
+        onClose={() => setViewingStudent(null)}
       />
     )}
-
-    {/* 編輯會員 Modal */}
+{/* 編輯會員 Modal */}
       {/* 編輯會員 Modal */}
       {editingStudent && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center overflow-y-auto bg-slate-900/50 px-5 py-8">
@@ -1080,6 +1179,90 @@ phone:
           </div>
         </div>
       )}
+      {/* NAYA_MEMBER_COUPON_COLUMN: 優惠券明細 */}
+      {couponStudent && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4">
+          <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  {couponStudent.name}｜優惠券
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {couponStudent.phone || couponStudent.email}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCouponStudent(null)}
+                className="rounded-xl border border-slate-300 px-4 py-2 text-sm"
+              >
+                關閉
+              </button>
+            </div>
+
+            {couponLoading ? (
+              <p className="py-8 text-center text-slate-500">載入中……</p>
+            ) : couponError ? (
+              <p className="mt-5 rounded-xl bg-red-50 p-4 text-sm text-red-700">
+                {couponError}
+              </p>
+            ) : (
+              <>
+                <p className="mt-5 text-sm text-slate-600">
+                  共 {memberCoupons.length} 張優惠券
+                </p>
+
+                {memberCoupons.length === 0 ? (
+                  <p className="mt-3 rounded-xl bg-slate-50 p-5 text-center text-slate-500">
+                    目前沒有查到優惠券。
+                  </p>
+                ) : (
+                  <div className="mt-3 max-h-[55vh] space-y-3 overflow-y-auto">
+                    {memberCoupons.map((coupon, index) => (
+                      <div
+                        key={String(coupon.id ?? index)}
+                        className="rounded-xl border border-slate-200 p-4"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-semibold text-slate-900">
+                            {String(coupon.name ?? coupon.couponName ?? coupon.couponId ?? "優惠券")}
+                          </p>
+                          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold">
+                            {coupon.status === "available"
+                              ? "可使用"
+                              : coupon.status === "used"
+                                ? "已使用"
+                                : String(coupon.status ?? "狀態未知")}
+                          </span>
+                        </div>
+                        <div className="mt-2 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
+                          <p>
+                            折扣：{
+                              typeof coupon.discountRate === "number"
+                                ? `${Math.round(coupon.discountRate * 10)} 折`
+                                : "未提供"
+                            }
+                          </p>
+                          <p>取得方式：{String(coupon.source ?? "未記錄")}</p>
+                          <p>優惠券 ID：{String(coupon.couponId ?? "—")}</p>
+                          <p>紀錄 ID：{String(coupon.id ?? "—")}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      {journeyStudent && (
+  <StudentJourneyModal
+    student={journeyStudent}
+    onClose={() => setJourneyStudent(null)}
+  />
+)}
     </>
   );
 }

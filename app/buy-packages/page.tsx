@@ -65,11 +65,14 @@ export default function BuyPackagesPage() {
     useState(false);
 const [birthdayMonth, setBirthdayMonth] = useState<number | null>(null);
 const [birthdayDay, setBirthdayDay] = useState<number | null>(null);
+const [birthdayUsageLoaded, setBirthdayUsageLoaded] = useState(false);
+const [birthdayUsedThisYear, setBirthdayUsedThisYear] = useState(true);
 
   useEffect(() => {
     let unsubscribePackages: (() => void) | undefined;
     let unsubscribeUser: (() => void) | undefined;
     let unsubscribeUserCoupons: (() => void) | undefined;
+    let unsubscribeBirthdayUsage: (() => void) | undefined;
 
     const unsubscribeAuth = onAuthStateChanged(
       auth,
@@ -80,6 +83,32 @@ const [birthdayDay, setBirthdayDay] = useState<number | null>(null);
         }
 
         setUserId(user.uid);
+
+        // NAYA_BIRTHDAY_USAGE_SUBSCRIPTION
+        setBirthdayUsageLoaded(false);
+        setBirthdayUsedThisYear(true);
+
+        const birthdayYear = Number(
+          new Intl.DateTimeFormat("en", {
+            timeZone: "Asia/Taipei",
+            year: "numeric",
+          }).format(new Date())
+        );
+
+        unsubscribeBirthdayUsage?.();
+        unsubscribeBirthdayUsage = onSnapshot(
+          doc(db, "birthdayCouponUsage", `${user.uid}_${birthdayYear}`),
+          (snapshot) => {
+            setBirthdayUsedThisYear(snapshot.exists());
+            setBirthdayUsageLoaded(true);
+          },
+          (error) => {
+            console.error("讀取生日優惠使用紀錄失敗：", error);
+            setBirthdayUsedThisYear(true);
+            setBirthdayUsageLoaded(true);
+            setMessage("暫時無法確認生日優惠資格，請稍後再試。");
+          }
+        );
 
         // 讀取會員資料：判斷是否仍有新生優惠
         unsubscribeUser = onSnapshot(
@@ -195,6 +224,7 @@ setBirthdayDay(
       unsubscribePackages?.();
       unsubscribeUser?.();
       unsubscribeUserCoupons?.();
+      unsubscribeBirthdayUsage?.();
     };
   }, [router]);
 
@@ -220,7 +250,13 @@ const currentTaipeiMonth = Number(
 );
 
 const hasBirthdayBenefit =
+
+  birthdayUsageLoaded &&
+
+  !birthdayUsedThisYear &&
+
   birthdayMonth !== null &&
+
   birthdayMonth === currentTaipeiMonth;
   const selectableCoupons = useMemo(() => {
   const nextCoupons: AvailableCoupon[] = [
@@ -264,6 +300,25 @@ const hasBirthdayBenefit =
   isNewStudent,
   selectedPackage,
 ]);
+  // 生日當月且尚未使用時，自動選取生日優惠。
+  useEffect(() => {
+    const birthdayCouponId = `birthday_${currentTaipeiYear}`;
+
+    if (
+      hasBirthdayBenefit &&
+      selectedPackage &&
+      selectedCouponId === "" &&
+      selectableCoupons.some((coupon) => coupon.id === birthdayCouponId)
+    ) {
+      setSelectedCouponId(birthdayCouponId);
+    }
+  }, [
+    hasBirthdayBenefit,
+    selectedPackage,
+    selectedCouponId,
+    selectableCoupons,
+    currentTaipeiYear,
+  ]);
 
   const selectedCoupon =
     selectableCoupons.find(

@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  getClassLocationAddress,
+  getClassLocationMapsUrl,
+} from "@/lib/classLocations";
+
 import { useEffect, useState } from "react";
 import {
   collection,
@@ -21,6 +26,7 @@ import BookingCalendar from "@/components/BookingCalendar";
 type ClassData = {
   id: string;
   courseName: string;
+  location: string;
   startTime: Timestamp;
   pointsRequired: number;
   capacity: number;
@@ -105,6 +111,10 @@ const [selectedCourse, setSelectedCourse] =
 
                 courseName: String(
                   data.courseName ?? ""
+                ),
+
+                location: String(
+                  data.location ?? ""
                 ),
 
                 startTime:
@@ -538,6 +548,24 @@ const groupedClasses =
               {formatClassTime(
                 classItem.startTime
               )}
+            </p>
+
+            <p className="mt-2 text-sm text-slate-600">
+              📍 {classItem.location || "地點待確認"}
+                  {getClassLocationAddress(classItem.location) && (
+                    <span className="mt-1 block text-sm text-slate-500">
+                      📌 {getClassLocationAddress(classItem.location)}
+                      <br />
+                      <a
+                        href={getClassLocationMapsUrl(classItem.location)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-2 font-medium text-sky-700 underline"
+                      >
+                        🗺️ 開啟 Google Maps
+                      </a>
+                    </span>
+                  )}
             </p>
 
             {/* =====================

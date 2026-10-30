@@ -169,6 +169,8 @@ export default function AdminCreateClass() {
   const [endTime, setEndTime] =
     useState("");
 
+  const [location, setLocation] = useState("");
+
   const [capacity, setCapacity] =
     useState("8");
 
@@ -224,6 +226,7 @@ export default function AdminCreateClass() {
     setExcludedDates([]);
     setStartTime("");
     setEndTime("");
+    setLocation("");
     setCapacity("8");
     setSpecialPoints("");
   }
@@ -467,6 +470,7 @@ export default function AdminCreateClass() {
             status: "open",
 
             teacher: "Naya",
+            location,
 
             createdBy:
               user.uid,
@@ -653,6 +657,25 @@ export default function AdminCreateClass() {
                   />
                 </div>
               )}
+
+              {/* 上課地點 */}
+              <div className="mt-5">
+                <label className="mb-2 block font-semibold text-slate-800">
+                  上課地點
+                </label>
+
+                <select
+                  required
+                  value={location}
+                  onChange={(event) => setLocation(event.target.value)}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-sky-500"
+                >
+                  <option value="">請選擇上課地點</option>
+                  <option value="中山國小">中山國小</option>
+                  <option value="松江南京｜A 教室">松江南京｜A 教室</option>
+                  <option value="松江南京｜B 教室">松江南京｜B 教室</option>
+                </select>
+              </div>
 
               {/* 單堂日期 */}
               {createMode ===

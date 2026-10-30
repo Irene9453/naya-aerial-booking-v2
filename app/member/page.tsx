@@ -1,11 +1,18 @@
 "use client";
 
+import {
+  getClassLocationAddress,
+  getClassLocationMapsUrl,
+} from "@/lib/classLocations";
+
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged, reload, sendEmailVerification, signOut } from "firebase/auth";
 import {
   collection,
   doc,
+  getDoc,
   onSnapshot,
   query,
   Timestamp,
@@ -15,7 +22,11 @@ import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import CancelBookingButton from "@/components/CancelBookingButton";
 import NotificationCenter from "@/components/NotificationCenter";
+import PushNotificationSettings from "@/components/PushNotificationSettings";
+import { cleanupCurrentUserPushToken } from "@/lib/pushTokenCleanup";
 import SpecialLeaveBalance from "@/components/SpecialLeaveBalance";
+import MemberAerialJourney from "@/components/MemberAerialJourney";
+import LegacyMemberClaim from "@/components/LegacyMemberClaim";
 
 type MemberData = {
   name: string;
@@ -24,11 +35,16 @@ type MemberData = {
   experience: string;
   points: number;
   role: "student" | "admin";
+   legacyStatus:
+    | "eligible"
+    | "claimed"
+    | "new";
 };
 
 type BookingData = {
   id: string;
   classId: string;
+  location: string;
   courseName: string;
   classStartTime: Timestamp | null;
   pointsUsed: number;
@@ -42,6 +58,7 @@ type PointTransactionData = {
   type: string;
   amount: number;
   balanceAfter: number;
+  classStartTime: Timestamp | null;
   createdAt: Timestamp | null;
 };
 
@@ -65,12 +82,31 @@ function formatDateTime(timestamp: Timestamp | null) {
     hour12: false,
   });
 }
+function formatClassDateTime(
+  timestamp: Timestamp | null
+) {
+  if (!timestamp) {
+    return "";
+  }
 
+  return timestamp.toDate().toLocaleString(
+    "zh-TW",
+    {
+      timeZone: "Asia/Taipei",
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }
+  );
+}
 export default function MemberPage() {
   const router = useRouter();
 
   const [member, setMember] = useState<MemberData | null>(null);
   const [bookings, setBookings] = useState<BookingData[]>([]);
+  const [classLocations, setClassLocations] = useState<Record<string, string>>({});
   const [userId, setUserId] = useState("");
   const [pointTransactions, setPointTransactions] = useState<
     PointTransactionData[]
@@ -78,18 +114,92 @@ export default function MemberPage() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
-
+  const [verificationRequired, setVerificationRequired] = useState(false);
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [verificationBusy, setVerificationBusy] = useState(false);
+const [showAllPointTransactions, setShowAllPointTransactions] =
+  useState(false);
   useEffect(() => {
     let unsubscribeMember: (() => void) | undefined;
     let unsubscribeBookings: (() => void) | undefined;
+    let unsubscribeClasses: (() => void) | undefined;
     let unsubscribePoints: (() => void) | undefined;
+    let cancelled = false;
 
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (!user) {
         router.replace("/login");
         return;
       }
- setUserId(user.uid);
+
+      try {
+        // 先確認管理員身分，避免將既有管理員鎖在後台外。
+        const profile = await getDoc(doc(db, "users", user.uid));
+        if (cancelled) return;
+        if (!profile.exists()) {
+          setMessage("找不到會員資料，請聯繫老師。");
+          setIsLoading(false);
+          return;
+        }
+        const isAdmin = profile.data().role === "admin";
+        if (!isAdmin) {
+          await reload(user);
+          if (cancelled) return;
+          if (!user.emailVerified) {
+            setVerificationEmail(user.email ?? "");
+            setVerificationRequired(true);
+            setIsLoading(false);
+            return;
+          }
+
+          // Emulator-only：已驗證 Email 的舊會員自動接續認領。
+          if (
+            process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true" &&
+            process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === "demo-naya-aerial"
+          ) {
+            // 認領資料由後端查詢，避免前端直接讀取敏感資料。
+            const token = await user.getIdToken(true);
+
+            if (cancelled) return;
+
+            const response = await fetch(
+              "/api/legacy-members/auto-claim",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({}),
+              }
+            );
+
+            // 404 表示沒有舊會員認領申請，一般會員正常進入。
+            if (response.status !== 404) {
+              const result = await response.json().catch(() => ({}));
+
+              if (!response.ok || result.status !== "approved") {
+                throw new Error(
+                  typeof result.error === "string"
+                    ? result.error
+                    : "舊會員點數自動移轉失敗。"
+                );
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error("確認會員 Email 驗證狀態失敗：", error);
+        if (!cancelled) {
+          setMessage("無法確認會員驗證狀態，請稍後重新整理。");
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      if (cancelled) return;
+      setVerificationRequired(false);
+      setUserId(user.uid);
       // 即時會員資料與點數
       unsubscribeMember = onSnapshot(
         doc(db, "users", user.uid),
@@ -101,15 +211,21 @@ export default function MemberPage() {
           }
 
           const data = snapshot.data();
+setMember({
+  name: String(data.name ?? ""),
+  email: String(data.email ?? user.email ?? ""),
+  phone: String(data.phone ?? ""),
+  experience: String(data.experience ?? ""),
+  points: Number(data.points ?? 0),
+  role: data.role === "admin" ? "admin" : "student",
 
-          setMember({
-            name: String(data.name ?? ""),
-            email: String(data.email ?? user.email ?? ""),
-            phone: String(data.phone ?? ""),
-            experience: String(data.experience ?? ""),
-            points: Number(data.points ?? 0),
-            role: data.role === "admin" ? "admin" : "student",
-          });
+  legacyStatus:
+    data.legacyMemberId || data.legacyClaimedAt || data.legacyStatus === "claimed"
+      ? "claimed"
+      : data.isNewStudent === true || data.legacyStatus === "new"
+      ? "new"
+      : "eligible",
+});
 
           setIsLoading(false);
         },
@@ -117,6 +233,27 @@ export default function MemberPage() {
           console.error(error);
           setMessage("讀取會員資料失敗。");
           setIsLoading(false);
+        }
+      );
+
+      // 取得課程地點，供會員預約紀錄顯示
+      unsubscribeClasses = onSnapshot(
+        collection(db, "classes"),
+        (snapshot) => {
+          if (cancelled) return;
+
+          const locations: Record<string, string> = {};
+
+          snapshot.docs.forEach((classDocument) => {
+            locations[classDocument.id] = String(
+              classDocument.data().location ?? ""
+            );
+          });
+
+          setClassLocations(locations);
+        },
+        (error) => {
+          console.error("讀取課程地點失敗：", error);
         }
       );
 
@@ -137,6 +274,7 @@ export default function MemberPage() {
   id: bookingDocument.id,
   classId: String(data.classId ?? ""),
   courseName: String(data.courseName ?? ""),
+  location: String(data.location ?? ""),
                 classStartTime:
                   data.classStartTime instanceof Timestamp
                     ? data.classStartTime
@@ -177,16 +315,22 @@ export default function MemberPage() {
               const data = transactionDocument.data();
 
               return {
-                id: transactionDocument.id,
-                courseName: String(data.courseName ?? ""),
-                type: String(data.type ?? ""),
-                amount: Number(data.amount ?? 0),
-                balanceAfter: Number(data.balanceAfter ?? 0),
-                createdAt:
-                  data.createdAt instanceof Timestamp
-                    ? data.createdAt
-                    : null,
-              };
+  id: transactionDocument.id,
+  courseName: String(data.courseName ?? ""),
+  type: String(data.type ?? ""),
+  amount: Number(data.amount ?? 0),
+  balanceAfter: Number(data.balanceAfter ?? 0),
+
+  classStartTime:
+    data.classStartTime instanceof Timestamp
+      ? data.classStartTime
+      : null,
+
+  createdAt:
+    data.createdAt instanceof Timestamp
+      ? data.createdAt
+      : null,
+};
             })
             .sort(
               (first, second) =>
@@ -204,22 +348,81 @@ export default function MemberPage() {
     });
 
     return () => {
+      cancelled = true;
       unsubscribeAuth();
       unsubscribeMember?.();
       unsubscribeBookings?.();
+      unsubscribeClasses?.();
       unsubscribePoints?.();
     };
   }, [router]);
 
-  async function handleLogout() {
-    try {
-      await signOut(auth);
+  async function handleCheckVerification() {
+    const user = auth.currentUser;
+    if (!user) {
       router.replace("/login");
+      return;
+    }
+    setVerificationBusy(true);
+    setMessage("");
+    try {
+      await reload(user);
+      if (!user.emailVerified) {
+        setMessage("尚未完成 Email 驗證，請先點擊信箱中的驗證連結。");
+        return;
+      }
+      await user.getIdToken(true);
+      // 重新執行會員資料載入及權限檢查。
+      window.location.reload();
     } catch (error) {
       console.error(error);
-      setMessage("登出失敗，請稍後再試。");
+      setMessage("確認驗證狀態失敗，請稍後再試。");
+    } finally {
+      setVerificationBusy(false);
     }
   }
+
+  async function handleResendVerification() {
+    const user = auth.currentUser;
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+    setVerificationBusy(true);
+    setMessage("");
+    try {
+      await sendEmailVerification(user);
+      setMessage("驗證信已重新寄出，請檢查收件匣及垃圾郵件匣。");
+    } catch (error) {
+      console.error(error);
+      setMessage("寄送失敗，可能寄送過於頻繁，請稍後再試。");
+    } finally {
+      setVerificationBusy(false);
+    }
+  }
+
+  async function handleLogout() {
+  try {
+    if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR !== "true") {
+      try {
+        await cleanupCurrentUserPushToken();
+      } catch (pushError) {
+        console.error("[Naya Push] Logout cleanup failed:", pushError);
+
+        setMessage(
+          "推播通知尚未成功清除，為避免其他人收到你的通知，請先關閉此裝置的瀏覽器通知權限，再重新登出。"
+        );
+        return;
+      }
+    }
+
+    await signOut(auth);
+    router.replace("/login");
+  } catch (error) {
+    console.error(error);
+    setMessage("登出失敗，請稍後再試。");
+  }
+}
 
   if (isLoading) {
     return (
@@ -227,6 +430,31 @@ export default function MemberPage() {
         <p className="text-center text-slate-600">
           會員資料載入中……
         </p>
+      </section>
+    );
+  }
+
+  if (verificationRequired) {
+    return (
+      <section className="min-h-[calc(100vh-8rem)] bg-sky-50 px-6 py-20">
+        <div className="mx-auto max-w-lg rounded-3xl bg-white p-8 text-center shadow-sm">
+          <h1 className="text-2xl font-bold text-slate-900">請先完成 Email 驗證</h1>
+          <p className="mt-4 break-all text-slate-600">{verificationEmail}</p>
+          <p className="mt-3 leading-7 text-slate-600">
+            請開啟驗證信並點擊連結。完成前無法進入會員中心。
+          </p>
+          <button type="button" disabled={verificationBusy} onClick={handleCheckVerification}
+            className="mt-6 w-full rounded-xl bg-sky-600 px-6 py-3 font-semibold text-white disabled:opacity-50">
+            我已完成 Email 驗證
+          </button>
+          <button type="button" disabled={verificationBusy} onClick={handleResendVerification}
+            className="mt-3 w-full rounded-xl border border-sky-300 px-6 py-3 font-semibold text-sky-700 disabled:opacity-50">
+            重新寄送驗證信
+          </button>
+          <button type="button" onClick={handleLogout}
+            className="mt-4 text-sm text-slate-500 underline">登出</button>
+          {message && <p className="mt-5 text-sm text-red-600">{message}</p>}
+        </div>
       </section>
     );
   }
@@ -255,8 +483,28 @@ export default function MemberPage() {
     );
   }
 
-  const activeBookings = bookings.filter(
-    (booking) => booking.status === "booked"
+  const now = Date.now();
+
+const activeBookings = bookings.filter(
+  (booking) =>
+    booking.status === "booked" &&
+    booking.classStartTime &&
+    booking.classStartTime.toMillis() > now
+);
+
+const historyBookings = bookings
+  .filter(
+    (booking) =>
+      booking.status !== "booked" ||
+      (
+        booking.classStartTime &&
+        booking.classStartTime.toMillis() <= now
+      )
+  )
+  .sort(
+    (first, second) =>
+      timestampToMilliseconds(second.classStartTime) -
+      timestampToMilliseconds(first.classStartTime)
   );
 
   return (
@@ -344,13 +592,57 @@ export default function MemberPage() {
             </dl>
           </article>
         </div>
+        {/* 舊會員點數認領 */}
+{member.legacyStatus === "claimed" ? (
+  <div className="mt-8 rounded-2xl border border-green-200 bg-green-50 p-5 text-green-800">
+    ✓ 舊會員點數已成功移轉
+  </div>
+) : member.legacyStatus === "eligible" ? (
+  <div className="mt-8">
+    <LegacyMemberClaim />
+  </div>
+) : null}
+{/* 我的空中旅程 */}
+<MemberAerialJourney studentName={member.name} />
+
               {/* 特殊請假額度 */}
         {userId && (
           <div className="mt-8">
             <SpecialLeaveBalance userId={userId} />
           </div>
         )}
-<NotificationCenter />
+
+<details className="group mt-8 overflow-hidden rounded-3xl border border-sky-100 bg-white shadow-sm">
+  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-6 marker:hidden md:p-7">
+    <div>
+      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-600">
+        Notifications
+      </p>
+
+      <h2 className="mt-2 text-xl font-bold text-slate-900">
+        最新通知
+      </h2>
+
+      <p className="mt-2 text-sm text-slate-500">
+        點擊查看課程提醒及系統通知
+      </p>
+    </div>
+
+    <span className="shrink-0 rounded-xl bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 group-open:hidden">
+      展開
+    </span>
+
+    <span className="hidden shrink-0 rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 group-open:inline-block">
+      收合
+    </span>
+  </summary>
+
+  <div className="border-t border-sky-100 px-4 pb-5 md:px-6">
+    <PushNotificationSettings />
+    <NotificationCenter />
+  </div>
+</details>
+
 
         {/* 我的預約 */}
         <article className="mt-8 rounded-3xl border border-sky-100 bg-white p-7 shadow-sm md:p-9">
@@ -395,6 +687,23 @@ export default function MemberPage() {
                       <p className="mt-2 text-slate-600">
                         {formatDateTime(booking.classStartTime)}
                       </p>
+                      <p className="mt-2 text-sm text-slate-600">
+                        📍 {classLocations[booking.classId] || booking.location || "地點待確認"}
+                        {getClassLocationAddress(classLocations[booking.classId] || booking.location) && (
+                          <span className="mt-1 block text-sm text-slate-500">
+                            📌 {getClassLocationAddress(classLocations[booking.classId] || booking.location)}
+                            <br />
+                            <a
+                              href={getClassLocationMapsUrl(classLocations[booking.classId] || booking.location)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium text-sky-700 underline"
+                            >
+                              🗺️ 開啟 Google Maps
+                            </a>
+                          </span>
+                        )}
+                      </p>
                     </div>
 
                     <span className="rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
@@ -417,16 +726,128 @@ export default function MemberPage() {
             </div>
           )}
         </article>
-
-        {/* 點數紀錄 */}
-        <article className="mt-8 rounded-3xl border border-sky-100 bg-white p-7 shadow-sm md:p-9">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-600">
-            Point History
+{/* 歷史上課紀錄 */}
+<article className="mt-8 rounded-3xl border border-sky-100 bg-white p-7 shadow-sm md:p-9">
+  <details>
+    <summary className="cursor-pointer list-none">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
+            Booking History
           </p>
 
           <h2 className="mt-2 text-2xl font-bold text-slate-900">
-            點數異動紀錄
+            歷史上課紀錄
           </h2>
+
+          <p className="mt-2 text-sm text-slate-500">
+            共 {historyBookings.length} 堂
+          </p>
+        </div>
+
+        <span className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600">
+          點此展開
+        </span>
+      </div>
+    </summary>
+
+    {historyBookings.length === 0 ? (
+      <div className="mt-7 rounded-2xl bg-slate-50 px-5 py-8 text-center">
+        <p className="text-slate-600">
+          目前沒有歷史上課紀錄。
+        </p>
+      </div>
+    ) : (
+      <div className="mt-7 max-h-[500px] space-y-4 overflow-y-auto pr-2">
+        {historyBookings.map((booking) => (
+          <div
+            key={booking.id}
+            className="rounded-2xl border border-slate-200 p-5"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">
+                  {booking.courseName}
+                </h3>
+
+                <p className="mt-2 text-slate-600">
+                  {formatDateTime(
+                    booking.classStartTime
+                  )}
+                </p>
+                <p className="mt-2 text-sm text-slate-600">
+                  📍 {classLocations[booking.classId] || booking.location || "地點待確認"}
+                        {getClassLocationAddress(classLocations[booking.classId] || booking.location) && (
+                          <span className="mt-1 block text-sm text-slate-500">
+                            📌 {getClassLocationAddress(classLocations[booking.classId] || booking.location)}
+                            <br />
+                            <a
+                              href={getClassLocationMapsUrl(classLocations[booking.classId] || booking.location)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium text-sky-700 underline"
+                            >
+                              🗺️ 開啟 Google Maps
+                            </a>
+                          </span>
+                        )}
+                </p>
+              </div>
+
+              <span
+  className={`rounded-full px-4 py-2 text-sm font-semibold ${
+    booking.status === "cancelled"
+      ? "bg-red-50 text-red-600"
+      : booking.status === "special_leave"
+      ? "bg-sky-50 text-sky-700"
+      : "bg-slate-100 text-slate-600"
+  }`}
+>
+  {booking.status === "cancelled"
+    ? "已取消"
+    : booking.status === "special_leave"
+    ? "特殊請假"
+    : "已結束"}
+</span>
+            </div>
+
+            <p className="mt-4 text-sm text-slate-500">
+              使用點數：{booking.pointsUsed} 點
+            </p>
+          </div>
+        ))}
+      </div>
+    )}
+  </details>
+</article>
+        {/* 點數紀錄 */}
+        <article className="mt-8 rounded-3xl border border-sky-100 bg-white p-7 shadow-sm md:p-9">
+
+<details className="group">
+  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 marker:hidden">
+    <div>
+      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-600">
+        Point History
+      </p>
+
+      <h2 className="mt-2 text-2xl font-bold text-slate-900">
+        點數異動紀錄
+      </h2>
+
+      <p className="mt-2 text-sm text-slate-500">
+        共 {pointTransactions.length} 筆異動紀錄
+      </p>
+    </div>
+
+    <span className="shrink-0 rounded-xl bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 group-open:hidden">
+      展開
+    </span>
+
+    <span className="hidden shrink-0 rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 group-open:inline-block">
+      收合
+    </span>
+  </summary>
+
 
           {pointTransactions.length === 0 ? (
             <div className="mt-7 rounded-2xl bg-slate-50 px-5 py-8 text-center">
@@ -436,15 +857,45 @@ export default function MemberPage() {
             </div>
           ) : (
             <div className="mt-7 divide-y divide-slate-100">
-              {pointTransactions.map((transaction) => (
+              {(showAllPointTransactions
+  ? pointTransactions
+  : pointTransactions.slice(0, 5)
+).map((transaction) => (
                 <div
                   key={transaction.id}
                   className="flex flex-wrap items-center justify-between gap-4 py-5"
                 >
                   <div>
                     <p className="font-semibold text-slate-900">
-                      {transaction.courseName || "點數調整"}
-                    </p>
+  {transaction.type === "cancellation_refund"
+    ? `取消課程退點｜${
+        transaction.classStartTime
+          ? `${formatClassDateTime(
+              transaction.classStartTime
+            )} `
+          : ""
+      }${transaction.courseName || "課程"}`
+
+    : transaction.type === "special_leave_refund"
+    ? `特殊請假退點｜${
+        transaction.classStartTime
+          ? `${formatClassDateTime(
+              transaction.classStartTime
+            )} `
+          : ""
+      }${transaction.courseName || "課程"}`
+
+    : transaction.type === "booking"
+    ? `預約課程｜${
+        transaction.classStartTime
+          ? `${formatClassDateTime(
+              transaction.classStartTime
+            )} `
+          : ""
+      }${transaction.courseName || "課程"}`
+
+    : transaction.courseName || "點數調整"}
+</p>
 
                     <p className="mt-1 text-sm text-slate-500">
                       {formatDateTime(transaction.createdAt)}
@@ -468,8 +919,29 @@ export default function MemberPage() {
                 </div>
               ))}
             </div>
+
           )}
-        </article>
+
+          {pointTransactions.length > 5 && (
+            <div className="mt-5 text-center">
+              <button
+                type="button"
+                onClick={() =>
+                  setShowAllPointTransactions((previous) => !previous)
+                }
+                className="rounded-xl border border-sky-200 bg-sky-50 px-6 py-3 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
+              >
+                {showAllPointTransactions
+                  ? "收起較舊紀錄"
+                  : `查看更多（剩餘 ${
+                      pointTransactions.length - 5
+                    } 筆）`}
+              </button>
+            </div>
+          )}
+        </details>
+      </article>
+
 
         {message && (
           <p className="mt-6 text-center text-sm text-red-600">
