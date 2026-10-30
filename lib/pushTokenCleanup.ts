@@ -1,14 +1,16 @@
-
-import { deleteDoc, doc } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  writeBatch,
+} from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { deletePushToken } from "@/lib/firebaseMessaging";
 
-const DEVICE_ID_KEY = "naya-push-device-id";
-
 /**
- * 登出前清理目前會員的推播 Token。
- * Firestore 刪除是必要步驟；瀏覽器 FCM Token
- * 清理失敗時，保留錯誤紀錄，但不阻止登出。
+ * 登出前清除目前會員所有已登記的推播 Token。
+ *
+ * 即使裝置 ID 遺失，也能清除 Firestore 推播紀錄。
+ * 其他裝置需要重新開啟推播，但會員資料不受影響。
  */
 export async function cleanupCurrentUserPushToken(): Promise<void> {
   if (
@@ -23,34 +25,33 @@ export async function cleanupCurrentUserPushToken(): Promise<void> {
     return;
   }
 
-  const deviceId = localStorage.getItem(DEVICE_ID_KEY);
-
-  if (!deviceId) {
-    // 無法定位 Firestore 文件，不可直接假設已清理。
-    throw new Error(
-      "找不到裝置 ID，無法確認 Firestore 推播 Token 是否已清除。"
-    );
-  }
-
-  const tokenRef = doc(
+  // 只查詢目前登入會員自己的推播紀錄
+  const tokensRef = collection(
     db,
     "users",
     user.uid,
-    "pushTokens",
-    deviceId
+    "pushTokens"
   );
 
-  // 必須先刪除 Firestore 紀錄。
-  // 若此步驟失敗，保留錯誤並阻止登出。
-  await deleteDoc(tokenRef);
+  const snapshot = await getDocs(tokensRef);
 
-  // Firestore 紀錄已刪除，後端不應再透過此文件取得 Token。
-  // FCM 本機清理失敗不應阻止會員登出。
+  // 批次刪除目前會員的推播紀錄
+  if (!snapshot.empty) {
+    const batch = writeBatch(db);
+
+    snapshot.docs.forEach((tokenDoc) => {
+      batch.delete(tokenDoc.ref);
+    });
+
+    await batch.commit();
+  }
+
+  // Firestore 清理成功後，嘗試清除本機 FCM Token
   try {
     await deletePushToken();
   } catch (error) {
     console.warn(
-      "[Naya Push] FCM token cleanup failed after Firestore deletion:",
+      "[Naya Push] Local FCM token cleanup failed:",
       error
     );
   }
