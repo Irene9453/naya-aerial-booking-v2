@@ -1,0 +1,38 @@
+name: Firebase Admin Module Test
+
+on:
+  push:
+    branches:
+      - fix/firebase-admin-esm
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check installed versions
+        run: npm ls firebase-admin jwks-rsa jose
+
+      - name: Test Firebase Admin imports
+        run: |
+          node -e "require('firebase-admin/app'); require('firebase-admin/auth'); console.log('Firebase Admin imports OK')"
+
+      - name: Test JWKS-RSA imports
+        run: |
+          node -e "require('jwks-rsa'); console.log('JWKS-RSA imports OK')"
