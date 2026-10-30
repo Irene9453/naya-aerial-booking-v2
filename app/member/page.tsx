@@ -401,26 +401,22 @@ setMember({
     }
   }
 
-  async function handleLogout() {
+async function handleLogout() {
   try {
     if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR !== "true") {
       try {
         await cleanupCurrentUserPushToken();
-     } catch (pushError) {
-  console.error("[Naya Push] Logout cleanup failed:", pushError);
+      } catch (pushError) {
+        console.error("[Naya Push] Logout cleanup failed:", pushError);
 
-  const errorMessage =
-    pushError instanceof Error
-      ? pushError.message
-      : String(pushError);
+        const errorMessage =
+          pushError instanceof Error
+            ? pushError.message
+            : String(pushError);
 
-  setMessage(
-    `推播清理失敗：${errorMessage}`
-  );
-  return;
-}
-  return;
-}
+        setMessage(`推播清理失敗：${errorMessage}`);
+        return;
+      }
     }
 
     await signOut(auth);
@@ -430,7 +426,6 @@ setMember({
     setMessage("登出失敗，請稍後再試。");
   }
 }
-
   if (isLoading) {
     return (
       <section className="min-h-[calc(100vh-8rem)] bg-sky-50 px-6 py-20">
