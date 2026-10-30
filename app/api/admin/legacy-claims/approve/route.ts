@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
-import { prepareLegacyCouponTransfer } from "@/lib/legacyCouponTransfer";
 
 export const runtime = "nodejs";
 
@@ -71,6 +70,18 @@ export async function POST(request: NextRequest) {
     const legacyRef = adminDb
       .collection("legacyMembers")
       .doc(legacyMemberId);
+
+    // 管理員核准前，從 Firebase Auth 重新確認申請人的 Email 驗證狀態。
+    const pendingClaim = await claimRef.get();
+    if (!pendingClaim.exists) return apiError("找不到認領申請。", 404);
+    const applicantUid = String(pendingClaim.data()?.uid ?? "");
+    if (!applicantUid || applicantUid !== requestId) {
+      return apiError("認領申請資料異常。", 400);
+    }
+    const applicantAuth = await adminAuth.getUser(applicantUid);
+    if (!applicantAuth.emailVerified) {
+      return apiError("會員尚未完成 Email 驗證，不能核准認領。", 409);
+    }
 
     // 4. Transaction：所有檢查與移轉一次完成
     const result = await adminDb.runTransaction(async (tx) => {
@@ -225,17 +236,7 @@ export async function POST(request: NextRequest) {
         throw new Error("DUPLICATE_TRANSACTION");
       }
 
-      // 認領優惠券：所有讀取完成後才寫入。
-      const couponTransfer = await prepareLegacyCouponTransfer(
-        tx,
-        adminDb,
-        uid,
-        legacyMemberId,
-        legacy.coupons
-      );
       // 9. 所有讀取完成後，才開始寫入
-      couponTransfer.write();
-
       tx.update(userRef, {
         points: newPoints,
         rewardPoints: newRewards,
@@ -328,3 +329,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
