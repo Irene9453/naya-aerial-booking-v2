@@ -38,4 +38,11 @@ jobs:
           node -e "require('jwks-rsa'); console.log('JWKS-RSA imports OK')"
 
       - name: Test Next.js Webpack build
+        env:
+          NEXT_PUBLIC_FIREBASE_API_KEY: "AIzaSyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "naya-build-test.firebaseapp.com"
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: "naya-build-test"
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: "naya-build-test.firebasestorage.app"
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "123456789012"
+          NEXT_PUBLIC_FIREBASE_APP_ID: "1:123456789012:web:abcdef1234567890abcdef"
         run: npm run build
