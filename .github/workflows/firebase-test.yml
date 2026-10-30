@@ -37,5 +37,5 @@ jobs:
         run: |
           node -e "require('jwks-rsa'); console.log('JWKS-RSA imports OK')"
 
-                - name: Test Next.js Webpack build
+      - name: Test Next.js Webpack build
         run: npm run build
