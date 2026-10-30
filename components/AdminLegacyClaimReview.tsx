@@ -128,11 +128,27 @@ export function AdminLegacyClaimReview() {
       return;
     }
 
-    const description = action === "approve"
-      ? `確定核准 ${legacy?.name} 的認領申請，移轉 ${legacy?.points} 點及 ${legacy?.rewardPoints} 點獎勵點數？`
-      : `確定拒絕手機 ${request.phone} 的認領申請？`;
+  const description = action === "approve"
+  ? `確定核准 ${legacy?.name} 的認領申請，移轉 ${legacy?.points} 點及 ${legacy?.rewardPoints} 點獎勵點數？`
+  : `確定拒絕手機 ${request.phone} 的認領申請？`;
 
-    if (!window.confirm(description)) return;
+if (!window.confirm(description)) return;
+
+// 管理員必須確認已獨立核實舊會員身分
+let identityVerificationMethod = "";
+
+if (action === "approve") {
+  const method = window.prompt(
+    "請填寫身分確認方式，例如：已透過舊會員原有 LINE 對話確認。\n\n注意：僅比對手機、生日或新註冊 Email 不算完成身分確認。"
+  );
+
+  if (!method?.trim()) {
+    setError("核准前必須完成身分確認，並填寫確認方式。");
+    return;
+  }
+
+  identityVerificationMethod = method.trim();
+}
 
     setBusyId(request.id);
     setError("");
@@ -154,12 +170,15 @@ export function AdminLegacyClaimReview() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          requestId: request.id,
-          ...(action === "approve" && legacy
-            ? { legacyMemberId: legacy.id }
-            : {}),
-        }),
+      body: JSON.stringify({
+  requestId: request.id,
+  ...(action === "approve" && legacy
+    ? {
+        legacyMemberId: legacy.id,
+        identityVerificationMethod,
+      }
+    : {}),
+}),
       });
 
       const data = await response.json();
