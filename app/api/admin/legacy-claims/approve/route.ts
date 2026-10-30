@@ -53,7 +53,19 @@ export async function POST(request: NextRequest) {
     const legacyMemberId = String(
       body.legacyMemberId ?? ""
     ).trim();
+const identityVerificationMethod = String(
+  body.identityVerificationMethod ?? ""
+).trim();
 
+if (
+  identityVerificationMethod.length < 10 ||
+  identityVerificationMethod.length > 500
+) {
+  return apiError(
+    "請填寫完整的舊會員身分確認方式（10～500 字）。",
+    400
+  );
+}
     if (
       !requestId ||
       !legacyMemberId ||
@@ -62,7 +74,21 @@ export async function POST(request: NextRequest) {
     ) {
       return apiError("申請編號或舊會員編號不正確。", 400);
     }
+// 申請編號即會員 UID，先確認 Email 已驗證
+let claimantAuth;
 
+try {
+  claimantAuth = await adminAuth.getUser(requestId);
+} catch {
+  return apiError("找不到申請會員的登入帳號。", 404);
+}
+
+if (!claimantAuth.emailVerified) {
+  return apiError(
+    "此會員尚未完成 Email 驗證，不能核准認領。",
+    409
+  );
+}
     const claimRef = adminDb
       .collection("legacyClaimRequests")
       .doc(requestId);
@@ -253,15 +279,16 @@ export async function POST(request: NextRequest) {
         updatedAt: FieldValue.serverTimestamp(),
       });
 
-      tx.update(claimRef, {
-        status: "approved",
-        legacyMemberId,
-        pointsTransferred: legacyPoints,
-        rewardPointsTransferred: legacyRewards,
-        reviewedBy: decoded.uid,
-        reviewedAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
+     tx.update(claimRef, {
+  status: "approved",
+  legacyMemberId,
+  pointsTransferred: legacyPoints,
+  rewardPointsTransferred: legacyRewards,
+  identityVerificationMethod,
+  reviewedBy: decoded.uid,
+  reviewedAt: FieldValue.serverTimestamp(),
+  updatedAt: FieldValue.serverTimestamp(),
+});
 
       tx.create(pointTransactionRef, {
   userId: uid,
