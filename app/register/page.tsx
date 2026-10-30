@@ -65,57 +65,27 @@ export default function RegisterPage() {
     setStage(type === "legacy" ? "legacy-info" : "form");
   }
 
-  async function handleLegacyInfo(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setMessage("");
+ async function handleLegacyInfo(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault();
+  setMessage("");
 
-    const normalizedPhone = normalizeTaiwanPhone(phone);
-    const birth = parseBirthday(birthday);
+  const normalizedPhone = normalizeTaiwanPhone(phone);
+  const birth = parseBirthday(birthday);
 
-    if (!isValidTaiwanMobile(normalizedPhone)) {
-      setMessage("請輸入正確的台灣手機號碼，例如 0912345678。");
-      return;
-    }
-
-    if (!birth) {
-      setMessage("請填寫正確的生日。");
-      return;
-    }
-
-    setIsSubmitting(true);
-
-    try {
-      const response = await fetch("/api/legacy-members/precheck", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          phone: normalizedPhone,
-          birthdayYear: birth.birthdayYear,
-          birthdayMonth: birth.birthdayMonth,
-          birthdayDay: birth.birthdayDay,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || "會員資料確認失敗，請稍後再試。");
-      }
-
-      if (result.matched !== true) {
-        setMessage("資料無法確認，請檢查手機與生日，或聯繫老師。");
-        return;
-      }
-
-      setStage("form");
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "會員資料確認失敗。"
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
+  if (!isValidTaiwanMobile(normalizedPhone)) {
+    setMessage("請輸入正確的台灣手機號碼，例如 0912345678。");
+    return;
   }
+
+  if (!birth) {
+    setMessage("請填寫正確的生日。");
+    return;
+  }
+
+  // 舊會員資料改由管理員於註冊後審核
+  // 不再要求註冊前查詢舊會員資料庫
+  setStage("form");
+}
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
