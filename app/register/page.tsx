@@ -287,28 +287,8 @@ export default function RegisterPage() {
         return;
       }
 
-      if (memberType === "legacy") {
-        const token = await user.getIdToken(true);
-        const response = await fetch("/api/legacy-members/auto-claim", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({}),
-        });
-
-        const result = await response.json().catch(() => ({}));
-
-        if (!response.ok || result.status !== "approved") {
-          throw new Error(
-            typeof result.error === "string"
-              ? result.error
-              : "舊會員點數尚未完成移轉，請稍後重試。"
-          );
-        }
-      }
-
+      // 舊會員完成 Email 驗證後維持 pending，等待管理員核准。
+      // 不呼叫 auto-claim，以免只有手機與生日就能領走舊會員權益。
       router.replace(getSafeRedirectPath());
     } catch (error) {
       console.error("[Naya Email Verification] Error:", error);
@@ -486,7 +466,7 @@ export default function RegisterPage() {
             {memberType === "legacy" && (
               <p className="mt-4 rounded-xl bg-violet-50 p-4 text-sm leading-6 text-violet-800">
                 {claimSubmitted
-                  ? "完成 Email 驗證後，系統將自動確認舊會員身分，並移轉剩餘課程點數、紅利點數及歷史上課紀錄。"
+                  ? "完成 Email 驗證後，認領申請將等待老師核對身分並核准。核准後才會移轉剩餘點數、紅利、優惠券與歷史堂數。"
                   : "舊會員認領申請尚未成功，請完成 Email 驗證後聯絡老師協助。"}
               </p>
             )}
