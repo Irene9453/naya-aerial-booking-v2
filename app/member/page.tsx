@@ -406,14 +406,21 @@ setMember({
     if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR !== "true") {
       try {
         await cleanupCurrentUserPushToken();
-      } catch (pushError) {
-        console.error("[Naya Push] Logout cleanup failed:", pushError);
+     } catch (pushError) {
+  console.error("[Naya Push] Logout cleanup failed:", pushError);
 
-        setMessage(
-          "推播通知尚未成功清除，為避免其他人收到你的通知，請先關閉此裝置的瀏覽器通知權限，再重新登出。"
-        );
-        return;
-      }
+  const errorMessage =
+    pushError instanceof Error
+      ? pushError.message
+      : String(pushError);
+
+  setMessage(
+    `推播清理失敗：${errorMessage}`
+  );
+  return;
+}
+  return;
+}
     }
 
     await signOut(auth);
