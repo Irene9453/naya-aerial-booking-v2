@@ -5,19 +5,21 @@ import { checkLegacyPrecheckRateLimit } from "@/lib/legacyPrecheckRateLimit";
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
-  // 安全限制：目前僅允許本機 Firebase Emulator 測試
-  if (
-    process.env.NODE_ENV === "production" ||
-    process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR !== "true" ||
-    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID !== "demo-naya-aerial" ||
-    process.env.FIRESTORE_EMULATOR_HOST !== "127.0.0.1:8080" ||
-    process.env.FIREBASE_AUTH_EMULATOR_HOST !== "127.0.0.1:9099"
-  ) {
-    return NextResponse.json(
-      { error: "舊會員認領功能尚未開放。" },
-      { status: 503 }
-    );
-  }
+ const isLocalEmulator =
+  process.env.NODE_ENV !== "production" &&
+  process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true" &&
+  process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === "demo-naya-aerial" &&
+  process.env.FIRESTORE_EMULATOR_HOST === "127.0.0.1:8080" &&
+  process.env.FIREBASE_AUTH_EMULATOR_HOST === "127.0.0.1:9099";
+
+const isLive = process.env.NAYA_LEGACY_CLAIM_LIVE === "true";
+
+if (!isLocalEmulator && !isLive) {
+  return NextResponse.json(
+    { error: "舊會員認領功能尚未開放。" },
+    { status: 503 }
+  );
+}
   try {
     // Emulator 測試專用：不信任使用者提供的 IP 標頭。
     const limit = await checkLegacyPrecheckRateLimit("local-emulator");
