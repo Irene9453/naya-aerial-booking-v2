@@ -678,10 +678,7 @@ const hasBirthdayBenefit =
                             </p>
 
                             <p className="mt-1 text-xs text-slate-500">
-                              {Math.round(
-                                coupon.discountRate *
-                                  100
-                              )}{" "}
+                              {Number((coupon.discountRate * 10).toFixed(1))}{" "}
                               折
                             </p>
                           </div>
