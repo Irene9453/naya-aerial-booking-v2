@@ -12,7 +12,7 @@ import { readNewStudentEligibility, eligibilityUserFields } from "@/lib/newStude
 
 export const runtime = "nodejs";
 
-const PAYMENT_METHODS = new Set(["transfer", "linepay_money"]);
+const PAYMENT_METHODS = new Set(["transfer"]);
 
 export async function POST(request: NextRequest) {
   if (process.env.NAYA_NEW_STUDENT_APPROVAL_ENABLED !== "true") {
