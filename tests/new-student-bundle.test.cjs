@@ -196,12 +196,18 @@ test('all matching legacy records must have verified no-purchase history',async(
 test('approved claim of another member cannot establish eligibility',async()=>{
  const f=fixture();verifiedLegacy(f,{claimedBy:'other'});assert.equal((await f.buy()).status,400);
 });
-test('pending claim still requires identity review even with no-purchase history',async()=>{
- const f=fixture();verifiedLegacy(f);f.data.get('legacyClaimRequests/student').status='pending';const result=await (await f.eligibility(f.request({},'student'))).json();assert.equal(result.reason,'legacy_claim_review');assert.equal((await f.buy()).status,400);
+test('verified no-purchase history allows eligibility while claim is pending',async()=>{
+ const f=fixture();verifiedLegacy(f);f.data.get('legacyClaimRequests/student').status='pending';const result=await (await f.eligibility(f.request({},'student'))).json();assert.equal(result.status,'eligible');assert.equal((await f.buy()).status,200);
 });
 test('missing linked legacy record remains pending rather than becoming new',async()=>{
  const f=fixture();verifiedLegacy(f);f.data.delete('legacyMembers/old');const result=await (await f.eligibility(f.request({},'student'))).json();assert.equal(result.status,'pending');
 });
 test('verified legacy history does not reset a consumed general benefit',async()=>{
  const f=fixture();verifiedLegacy(f);f.data.get('users/student').newStudentEligibilityReason='eligibility_consumed';assert.equal((await f.buy()).status,400);
+});
+test('verified registered-only legacy record can purchase before any claim without transferring legacy balances',async()=>{
+ const f=fixture();verifiedLegacy(f);delete f.data.get('users/student').legacyMemberId;delete f.data.get('users/student').legacyClaimedAt;
+ Object.assign(f.data.get('legacyMembers/old'),{status:'unclaimed',claimedBy:null,points:100});f.data.delete('legacyClaimRequests/student');
+ assert.equal((await f.buy('trial_yoga')).status,200);assert.equal((await f.finish('trial_yoga')).status,200);
+ assert.equal(f.data.get('users/student').points,0);assert.equal(f.data.get('legacyMembers/old').status,'unclaimed');assert.equal(f.data.get('legacyMembers/old').points,100);
 });

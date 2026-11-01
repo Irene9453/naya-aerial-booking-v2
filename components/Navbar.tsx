@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, User } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
 export default function Navbar() {
@@ -14,60 +14,44 @@ export default function Navbar() {
     "student" | "admin" | null
   >(null);
 
-  const [isLoading, setIsLoading] =
-    useState(true);
+  const [roleError, setRoleError] = useState(false);
 
   const [isMenuOpen, setIsMenuOpen] =
     useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(
-      auth,
-      async (firebaseUser) => {
-        setUser(firebaseUser);
-
-        if (!firebaseUser) {
-          setRole(null);
-          setIsLoading(false);
-          return;
-        }
-
-        try {
-          const userSnapshot = await getDoc(
-            doc(
-              db,
-              "users",
-              firebaseUser.uid
-            )
-          );
-
-          if (userSnapshot.exists()) {
-            const userData =
-              userSnapshot.data();
-
-            setRole(
-              userData.role === "admin"
-                ? "admin"
-                : "student"
-            );
-          } else {
-            setRole("student");
-          }
-        } catch (error) {
-          console.error(
-            "讀取會員身分失敗：",
-            error
-          );
-
-          setRole("student");
-        } finally {
-          setIsLoading(false);
-        }
-      }
-    );
-
-    return () => unsubscribe();
+    let unsubscribeProfile: (() => void) | undefined;
+    let generation = 0;
+    let disposed = false;
+    const unsubscribe = onAuthStateChanged(auth, firebaseUser => {
+      const current = ++generation;
+      unsubscribeProfile?.();
+      unsubscribeProfile = undefined;
+      setUser(firebaseUser);
+      setRole(null);
+      setRoleError(false);
+      if (!firebaseUser) return;
+      unsubscribeProfile = onSnapshot(doc(db, "users", firebaseUser.uid), snapshot => {
+        if (disposed || current !== generation) return;
+        if (!snapshot.exists()) { setRole(null); setRoleError(true); return; }
+        setRole(snapshot.data().role === "admin" ? "admin" : "student");
+        setRoleError(false);
+      }, error => {
+        if (disposed || current !== generation) return;
+        console.error("讀取會員身分失敗：", error);
+        setRole(null);
+        setRoleError(true);
+      });
+    }, error => {
+      if (disposed) return;
+      console.error("讀取登入狀態失敗：", error);
+      setUser(null); setRole(null); setRoleError(true);
+    });
+    return () => { disposed = true; generation++; unsubscribe(); unsubscribeProfile?.(); };
   }, []);
+
+  const memberHref = !user ? "/login" : role === "admin" ? "/admin" : "/member";
+  const memberLabel = !user ? "登入" : role === "admin" ? "管理後台" : "會員中心";
 
   function closeMenu() {
     setIsMenuOpen(false);
@@ -114,34 +98,10 @@ export default function Navbar() {
             預約
           </Link>
 
-          {isLoading ? (
-            <span className="text-slate-400">
-              會員
-            </span>
-          ) : user ? (
-            role === "admin" ? (
-              <Link
-                href="/admin"
-                className="rounded-full bg-sky-600 px-4 py-2 font-semibold text-white transition hover:bg-sky-700"
-              >
-                管理後台
-              </Link>
-            ) : (
-              <Link
-                href="/member"
-                className="rounded-full bg-sky-600 px-4 py-2 font-semibold text-white transition hover:bg-sky-700"
-              >
-                會員中心
-              </Link>
-            )
-          ) : (
-            <Link
-              href="/login"
-              className="rounded-full bg-sky-600 px-4 py-2 font-semibold text-white transition hover:bg-sky-700"
-            >
-              登入
-            </Link>
-          )}
+          <Link href={memberHref} className="rounded-full bg-sky-600 px-4 py-2 font-semibold text-white transition hover:bg-sky-700">
+            {memberLabel}
+          </Link>
+          {user && (roleError || role === null) && <Link href="/login" className="text-sm font-semibold text-sky-800 underline">登入頁</Link>}
         </nav>
 
         {/* 手機版漢堡按鈕 */}
@@ -196,37 +156,10 @@ export default function Navbar() {
               預約
             </Link>
 
-            {isLoading ? (
-              <div className="rounded-xl px-4 py-3 font-semibold text-slate-400">
-                會員
-              </div>
-            ) : user ? (
-              role === "admin" ? (
-                <Link
-                  href="/admin"
-                  onClick={closeMenu}
-                  className="mt-2 rounded-xl bg-sky-600 px-4 py-3 text-center font-semibold text-white"
-                >
-                  管理後台
-                </Link>
-              ) : (
-                <Link
-                  href="/member"
-                  onClick={closeMenu}
-                  className="mt-2 rounded-xl bg-sky-600 px-4 py-3 text-center font-semibold text-white"
-                >
-                  會員中心
-                </Link>
-              )
-            ) : (
-              <Link
-                href="/login"
-                onClick={closeMenu}
-                className="mt-2 rounded-xl bg-sky-600 px-4 py-3 text-center font-semibold text-white"
-              >
-                登入
-              </Link>
-            )}
+            <Link href={memberHref} onClick={closeMenu} className="mt-2 rounded-xl bg-sky-600 px-4 py-3 text-center font-semibold text-white">
+              {memberLabel}
+            </Link>
+            {user && (roleError || role === null) && <Link href="/login" onClick={closeMenu} className="rounded-xl px-4 py-3 font-semibold text-sky-800 underline">登入頁</Link>}
           </nav>
         </div>
       )}

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { useRouter } from "next/navigation";
+import { withConnectionTimeout } from "@/lib/clientConnection";
 import { auth } from "@/lib/firebase";
 
 function getSafeRedirectPath() {
@@ -58,7 +59,7 @@ export default function LoginPage() {
           email.trim(),
           password
         );
-await credential.user.reload();
+await withConnectionTimeout(credential.user.reload());
 
 if (!credential.user.emailVerified) {
   setMessage(
@@ -81,6 +82,7 @@ if (!credential.user.emailVerified) {
             Authorization: `Bearer ${token}`,
           },
           cache: "no-store",
+          signal: AbortSignal.timeout(15000),
         }
       );
 
@@ -141,6 +143,8 @@ if (!credential.user.emailVerified) {
         setMessage("Email 或密碼不正確。");
       } else if (errorCode === "auth/invalid-email") {
         setMessage("Email 格式不正確。");
+      } else if (errorCode === "auth/network-request-failed" || errorCode === "unavailable" || (error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name))) {
+        setMessage("連線暫時無法完成，請確認網路後再試一次。");
       } else if (errorCode === "auth/too-many-requests") {
         setMessage("嘗試次數過多，請稍後再試。");
       } else {

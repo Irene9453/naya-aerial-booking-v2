@@ -40,7 +40,7 @@ export function evaluateNewStudentEligibility(input: {
   if (legacyHistory === "unknown" || (hasLegacy && legacyHistory !== "never_purchased")) {
     return { status: "pending", reason: "legacy_purchase_history_pending" };
   }
-  if (input.hasLegacyClaim && !input.legacyClaimApproved) return { status: "pending", reason: "legacy_claim_review" };
+  if (input.hasLegacyClaim && !input.legacyClaimApproved && legacyHistory !== "never_purchased") return { status: "pending", reason: "legacy_claim_review" };
   // Old "legacy_member" denials were based only on account existence. Recheck them
   // after verified purchase history is available; never reset a consumed benefit.
   const legacyOnlyDenial = legacyHistory === "never_purchased" && ["legacy_member", "legacy_purchase"].includes(String(u.newStudentEligibilityReason));

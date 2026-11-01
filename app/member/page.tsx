@@ -101,6 +101,8 @@ function formatClassDateTime(
     }
   );
 }
+import { withConnectionTimeout, memberConnectionMessage } from "@/lib/clientConnection";
+
 export default function MemberPage() {
   const router = useRouter();
 
@@ -112,6 +114,7 @@ export default function MemberPage() {
     PointTransactionData[]
   >([]);
 
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [verificationRequired, setVerificationRequired] = useState(false);
@@ -125,30 +128,50 @@ const [showAllPointTransactions, setShowAllPointTransactions] =
     let unsubscribeClasses: (() => void) | undefined;
     let unsubscribePoints: (() => void) | undefined;
     let cancelled = false;
+    let generation = 0;
+    const stopSubscriptions = () => {
+      unsubscribeMember?.(); unsubscribeBookings?.(); unsubscribeClasses?.(); unsubscribePoints?.();
+      unsubscribeMember = unsubscribeBookings = unsubscribeClasses = unsubscribePoints = undefined;
+    };
+    let timer: ReturnType<typeof setTimeout>;
+    const startLoadingDeadline = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+      if (!cancelled) { setMessage(memberConnectionMessage({ code: "unavailable" })); finishLoading(); }
+      }, 15000);
+    };
+    startLoadingDeadline();
+    const finishLoading = () => { clearTimeout(timer); setIsLoading(false); };
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+      const current = ++generation;
+      const isCurrent = () => !cancelled && current === generation;
+      stopSubscriptions();
+      startLoadingDeadline();
+      setIsLoading(true); setMember(null); setUserId(""); setBookings([]); setPointTransactions([]); setClassLocations({}); setMessage(""); setVerificationRequired(false);
       if (!user) {
+        finishLoading();
         router.replace("/login");
         return;
       }
 
       try {
         // 先確認管理員身分，避免將既有管理員鎖在後台外。
-        const profile = await getDoc(doc(db, "users", user.uid));
-        if (cancelled) return;
+        const profile = await withConnectionTimeout(getDoc(doc(db, "users", user.uid)));
+        if (!isCurrent()) return;
         if (!profile.exists()) {
           setMessage("找不到會員資料，請聯繫老師。");
-          setIsLoading(false);
+          finishLoading();
           return;
         }
         const isAdmin = profile.data().role === "admin";
         if (!isAdmin) {
-          await reload(user);
-          if (cancelled) return;
+          await withConnectionTimeout(reload(user));
+          if (!isCurrent()) return;
           if (!user.emailVerified) {
             setVerificationEmail(user.email ?? "");
             setVerificationRequired(true);
-            setIsLoading(false);
+            finishLoading();
             return;
           }
 
@@ -160,7 +183,7 @@ const [showAllPointTransactions, setShowAllPointTransactions] =
             // 認領資料由後端查詢，避免前端直接讀取敏感資料。
             const token = await user.getIdToken(true);
 
-            if (cancelled) return;
+            if (!isCurrent()) return;
 
             const response = await fetch(
               "/api/legacy-members/auto-claim",
@@ -171,6 +194,7 @@ const [showAllPointTransactions, setShowAllPointTransactions] =
                   Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({}),
+                signal: AbortSignal.timeout(15000),
               }
             );
 
@@ -190,26 +214,29 @@ const [showAllPointTransactions, setShowAllPointTransactions] =
         }
       } catch (error) {
         console.error("確認會員 Email 驗證狀態失敗：", error);
-        if (!cancelled) {
-          setMessage("無法確認會員驗證狀態，請稍後重新整理。");
-          setIsLoading(false);
+        if (isCurrent()) {
+          setMessage(memberConnectionMessage(error));
+          finishLoading();
         }
         return;
       }
 
-      if (cancelled) return;
+      if (!isCurrent()) return;
       setVerificationRequired(false);
       setUserId(user.uid);
       // 即時會員資料與點數
       unsubscribeMember = onSnapshot(
         doc(db, "users", user.uid),
         (snapshot) => {
+          if (!isCurrent()) return;
+          if (!isCurrent()) return;
           if (!snapshot.exists()) {
             setMessage("找不到會員資料，請聯繫老師。");
-            setIsLoading(false);
+            finishLoading();
             return;
           }
 
+          if (!isCurrent()) return;
           const data = snapshot.data();
 setMember({
   name: String(data.name ?? ""),
@@ -227,12 +254,13 @@ setMember({
       : "eligible",
 });
 
-          setIsLoading(false);
+          finishLoading();
         },
         (error) => {
+          if (!isCurrent()) return;
           console.error(error);
-          setMessage("讀取會員資料失敗。");
-          setIsLoading(false);
+          setMessage(memberConnectionMessage(error));
+          finishLoading();
         }
       );
 
@@ -240,7 +268,8 @@ setMember({
       unsubscribeClasses = onSnapshot(
         collection(db, "classes"),
         (snapshot) => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
+          if (!isCurrent()) return;
 
           const locations: Record<string, string> = {};
 
@@ -266,6 +295,7 @@ setMember({
       unsubscribeBookings = onSnapshot(
         bookingsQuery,
         (snapshot) => {
+          if (!isCurrent()) return;
           const nextBookings = snapshot.docs
             .map((bookingDocument) => {
               const data = bookingDocument.data();
@@ -296,6 +326,7 @@ setMember({
           setBookings(nextBookings);
         },
         (error) => {
+          if (!isCurrent()) return;
           console.error(error);
           setMessage("讀取預約紀錄失敗。");
         }
@@ -310,6 +341,7 @@ setMember({
       unsubscribePoints = onSnapshot(
         pointsQuery,
         (snapshot) => {
+          if (!isCurrent()) return;
           const nextTransactions = snapshot.docs
             .map((transactionDocument) => {
               const data = transactionDocument.data();
@@ -341,6 +373,7 @@ setMember({
           setPointTransactions(nextTransactions);
         },
         (error) => {
+          if (!isCurrent()) return;
           console.error(error);
           setMessage("讀取點數紀錄失敗。");
         }
@@ -349,13 +382,12 @@ setMember({
 
     return () => {
       cancelled = true;
+      generation++;
+      clearTimeout(timer);
       unsubscribeAuth();
-      unsubscribeMember?.();
-      unsubscribeBookings?.();
-      unsubscribeClasses?.();
-      unsubscribePoints?.();
+      stopSubscriptions();
     };
-  }, [router]);
+  }, [router, loadAttempt]);
 
   async function handleCheckVerification() {
     const user = auth.currentUser;
@@ -432,6 +464,7 @@ async function handleLogout() {
         <p className="text-center text-slate-600">
           會員資料載入中……
         </p>
+        <div className="mt-6 flex justify-center gap-4"><button type="button" onClick={() => setLoadAttempt(value => value + 1)} className="rounded-xl border border-sky-600 px-4 py-3 font-semibold text-sky-800">重新載入</button><Link href="/login" className="rounded-xl px-4 py-3 font-semibold text-sky-800 underline">前往登入頁</Link></div>
       </section>
     );
   }
@@ -473,6 +506,7 @@ async function handleLogout() {
             {message || "目前找不到會員資料。"}
           </p>
 
+          <div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => setLoadAttempt(value => value + 1)} className="rounded-xl bg-sky-700 px-5 py-3 font-semibold text-white">重新載入</button><Link href="/login" className="rounded-xl border border-sky-600 px-5 py-3 font-semibold text-sky-800">前往登入頁</Link></div>
           <button
             type="button"
             onClick={handleLogout}

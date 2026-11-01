@@ -25,6 +25,10 @@ export async function GET() {
     appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
   };
 
+  const missingFields = Object.entries(config)
+    .filter(([key, value]) => key !== "storageBucket" && !value)
+    .map(([key]) => key);
+
   // 設定不完整時停止
   if (
     !config.apiKey ||
@@ -34,7 +38,7 @@ export async function GET() {
     !config.appId
   ) {
     return NextResponse.json(
-      { error: "Firebase configuration is incomplete." },
+      { error: "Firebase configuration is incomplete.", missingFields },
       {
         status: 503,
         headers: { "Cache-Control": "no-store" },

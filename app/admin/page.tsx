@@ -77,30 +77,59 @@ function formatDateTime(timestamp: Timestamp | null) {
   });
 }
 
+import { memberConnectionMessage } from "@/lib/clientConnection";
+
 export default function AdminPage() {
   const router = useRouter();
 
   const [students, setStudents] = useState<StudentData[]>([]);
   const [classes, setClasses] = useState<ClassData[]>([]);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
     let unsubscribeStudents: (() => void) | undefined;
     let unsubscribeClasses: (() => void) | undefined;
+    let unsubscribeAdmin: (() => void) | undefined;
+    let disposed = false;
+    let generation = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const startLoadingDeadline = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+      if (!disposed) { setMessage(memberConnectionMessage({ code: "unavailable" })); finishLoading(); }
+      }, 15000);
+    };
+    startLoadingDeadline();
+    const finishLoading = () => { clearTimeout(timer); setIsLoading(false); };
+    const stopData = () => {
+      unsubscribeStudents?.(); unsubscribeClasses?.();
+      unsubscribeStudents = unsubscribeClasses = undefined;
+    };
 
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      const current = ++generation;
+      const isCurrent = () => !disposed && current === generation;
+      unsubscribeAdmin?.(); stopData();
+      unsubscribeAdmin = undefined;
+      startLoadingDeadline();
+      setIsAdmin(false); setIsLoading(true); setStudents([]); setClasses([]); setMessage("");
       if (!user) {
-        router.replace("/login");
+        finishLoading();
+        router.replace("/login?redirect=/admin");
         return;
       }
 
       const adminRef = doc(db, "users", user.uid);
 
-      const unsubscribeAdmin = onSnapshot(
+      unsubscribeAdmin = onSnapshot(
         adminRef,
         (snapshot) => {
+          if (!isCurrent()) return;
           if (!snapshot.exists()) {
+            stopData(); setIsAdmin(false); finishLoading();
             router.replace("/member");
             return;
           }
@@ -108,15 +137,19 @@ export default function AdminPage() {
           const role = String(snapshot.data().role ?? "student");
 
           if (role !== "admin") {
+            stopData(); setIsAdmin(false); finishLoading();
             router.replace("/member");
             return;
           }
 
+          setIsAdmin(true);
+          if (unsubscribeStudents || unsubscribeClasses) return;
           const studentsQuery = query(collection(db, "users"));
 
           unsubscribeStudents = onSnapshot(
             studentsQuery,
             (studentsSnapshot) => {
+              if (!isCurrent()) return;
               const nextStudents = studentsSnapshot.docs
                 .map((studentDocument) => {
                   const data = studentDocument.data();
@@ -172,12 +205,13 @@ journeyLegacyClasses: Number(
                 );
 
               setStudents(nextStudents);
-              setIsLoading(false);
+              finishLoading();
             },
             (error) => {
+              if (!isCurrent()) return;
               console.error(error);
               setMessage("讀取會員資料失敗。");
-              setIsLoading(false);
+              finishLoading();
             }
           );
 
@@ -186,6 +220,7 @@ journeyLegacyClasses: Number(
           unsubscribeClasses = onSnapshot(
             classesQuery,
             (classesSnapshot) => {
+              if (!isCurrent()) return;
               const nextClasses = classesSnapshot.docs
                 .map((classDocument) => {
                   const data = classDocument.data();
@@ -217,27 +252,29 @@ allowMonthlyBooking: Boolean(
               setClasses(nextClasses);
             },
             (error) => {
+              if (!isCurrent()) return;
               console.error(error);
               setMessage("讀取課程資料失敗。");
             }
           );
         },
         (error) => {
+          if (!isCurrent()) return;
+          stopData(); setIsAdmin(false);
           console.error(error);
-          setMessage("無法確認管理員身分。");
-          setIsLoading(false);
+          setMessage(memberConnectionMessage(error));
+          finishLoading();
         }
       );
 
-      return unsubscribeAdmin;
+
     });
 
     return () => {
-      unsubscribeAuth();
-      unsubscribeStudents?.();
-      unsubscribeClasses?.();
+      disposed = true; generation++; clearTimeout(timer);
+      unsubscribeAuth(); unsubscribeAdmin?.(); stopData();
     };
-  }, [router]);
+  }, [router, loadAttempt]);
 
   if (isLoading) {
     return (
@@ -245,9 +282,18 @@ allowMonthlyBooking: Boolean(
         <p className="text-center text-slate-600">
           管理後台載入中……
         </p>
+        <div className="mt-6 flex justify-center gap-4"><button type="button" onClick={() => setLoadAttempt(value => value + 1)} className="rounded-xl border border-sky-600 px-4 py-3 font-semibold text-sky-800">重新載入</button><Link href="/login?redirect=/admin" className="rounded-xl px-4 py-3 font-semibold text-sky-800 underline">前往登入頁</Link></div>
       </section>
     );
   }
+
+  if (!isAdmin) return <section className="min-h-screen bg-slate-50 px-6 py-20">
+    <div className="mx-auto max-w-xl rounded-3xl bg-white p-8 text-center">
+      <h1 className="text-2xl font-bold text-slate-900">暫時無法開啟管理後台</h1>
+      <p role="status" className="mt-4 text-slate-700">{message || "請使用管理員帳號登入。"}</p>
+      <div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => setLoadAttempt(value => value + 1)} className="rounded-xl bg-sky-700 px-5 py-3 font-semibold text-white">重新載入</button><Link href="/login?redirect=/admin" className="rounded-xl border border-sky-600 px-5 py-3 font-semibold text-sky-800">前往登入頁</Link></div>
+    </div>
+  </section>;
 
   return (
     <section className="min-h-screen bg-slate-50 px-6 py-12 md:py-20">
