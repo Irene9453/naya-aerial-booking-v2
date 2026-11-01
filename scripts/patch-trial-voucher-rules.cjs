@@ -36,7 +36,7 @@ function addVoucherRule(source) {
   // Insert immediately after the documents opening brace; preserve all existing text.
   return source.slice(0, start) + rule + source.slice(start);
 }
-async function patch({ api, backupDir, publish }) {
+async function patch({ api, backupDir, publish, transform = addVoucherRule, successMessage = "發布成功：只新增會員讀取自己體驗券的權限；其餘原始規則保留。" }) {
   const current = async () => {
     const releases = await api.listAllReleases(PROJECT);
     const release = releases.find(value => value.name === RELEASE);
@@ -55,7 +55,7 @@ async function patch({ api, backupDir, publish }) {
   fs.writeFileSync(path.join(backupDir, 'backup.json'), JSON.stringify({ projectId: PROJECT, release, sha256: sha(original), downloadedAt: new Date().toISOString() }, null, 2));
   console.log(`線上原始規則已備份：${backupDir}`);
   console.log(`備份 SHA256：${sha(original)}`);
-  const updated = addVoucherRule(original);
+  const updated = transform(original);
   fs.writeFileSync(path.join(backupDir, 'patched.rules'), updated);
   const proposed = [{ ...files[0], content: updated }];
   const tested = await api.testRuleset(PROJECT, proposed);
@@ -75,7 +75,7 @@ async function patch({ api, backupDir, publish }) {
   await api.updateRelease(PROJECT, newRuleset, 'cloud.firestore');
   if ((await current()).rulesetName !== newRuleset) throw Error('發布後版本核對不一致，請查看 Firebase 控制台。');
   fs.writeFileSync(path.join(backupDir, 'published.json'), JSON.stringify({ ...publishInfo, verifiedAt: new Date().toISOString(), sha256: sha(updated) }, null, 2));
-  console.log('發布成功：只新增會員讀取自己體驗券的權限；其餘原始規則保留。');
+  console.log(successMessage);
   console.log('如需還原，執行：');
   console.log(`firebase deploy --only firestore:rules --project ${PROJECT} --config "${path.join(backupDir, 'firebase.restore.json')}"`);
   return { backupDir, published: true };
