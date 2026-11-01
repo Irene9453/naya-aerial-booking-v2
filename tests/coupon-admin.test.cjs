@@ -170,3 +170,12 @@ test('audit pagination does not skip legacy members', async () => {
   const second = await (await f.audit({ cursor: first.nextCursor })).json(); assert.equal(second.results.length, 3); assert.equal(second.nextCursor, null);
   assert.equal(new Set([...first.results, ...second.results].map(row => row.legacyMemberId)).size, 23);
 });
+const updatePurchaseHistory=(f,extra={},token='admin')=>f.load('app/api/admin/legacy-members/purchase-history/route.ts').POST(f.request({legacyMemberId:'legacy1',status:'never_purchased',evidence:'已核對舊系統完整交易紀錄，只有註冊沒有購課。',...extra},token));
+test('admin can verify no historical purchases for an already claimed member',async()=>{
+ const f=fixture();assert.equal((await updatePurchaseHistory(f)).status,200);const record=f.data.get('legacyMembers/legacy1');assert.equal(record.purchaseHistoryStatus,'never_purchased');assert.equal(record.purchaseHistoryVerifiedBy,'admin');assert.equal(f.data.get('users/student').points,5);assert.equal([...f.data.keys()].filter(key=>key.startsWith('legacyPurchaseHistoryLogs/')).length,1);
+});
+test('students cannot declare their own legacy account never-purchased',async()=>{const f=fixture();assert.equal((await updatePurchaseHistory(f,{},'student')).status,403);assert.equal(f.data.get('legacyMembers/legacy1').purchaseHistoryStatus,undefined)});
+test('verification requires a detailed source, not a zero balance assertion',async()=>{const f=fixture();assert.equal((await updatePurchaseHistory(f,{evidence:'零點'})).status,400)});
+for(const sale of [{studentId:'student'},{studentId:'legacy1'},{legacyMemberId:'legacy1'}])test('actual purchase blocks no-purchase verification '+JSON.stringify(sale),async()=>{const f=fixture();f.data.set('packageSales/proof',sale);assert.equal((await updatePurchaseHistory(f)).status,409);assert.equal(f.data.get('legacyMembers/legacy1').purchaseHistoryStatus,undefined)});
+test('independent new student offers do not block remaining offers',async()=>{const f=fixture();f.data.set('packageSales/new-offer',{studentId:'student',offerType:'new_student'});assert.equal((await updatePurchaseHistory(f)).status,200)});
+test('verification rechecks admin authority inside the transaction',async()=>{const f=fixture();f.beforeTransaction=()=>{f.data.get('users/admin').role='student'};assert.equal((await updatePurchaseHistory(f)).status,403);assert.equal(f.data.get('legacyMembers/legacy1').purchaseHistoryStatus,undefined)});

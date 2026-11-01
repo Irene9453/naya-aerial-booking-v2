@@ -10,7 +10,7 @@ const clone=x=>structuredClone(x);
 function fixture(){
  const data=new Map();let queue=Promise.resolve();let tick=0;
  const env={NAYA_NEW_STUDENT_APPROVAL_ENABLED:'true',NAYA_LEGACY_HISTORY_COMPLETE:'true'};
- const snap=key=>({exists:data.has(key),data:()=>clone(data.get(key))});
+ const snap=key=>({id:key.split('/').at(-1),exists:data.has(key),data:()=>clone(data.get(key))});
  const query=(collection,field,value)=>({collection,field,value,query:true,get:async()=>read({collection,field,value,query:true})});
  const read=ref=>ref.query?{get empty(){return this.docs.length===0},docs:[...data].filter(([k,v])=>k.startsWith(ref.collection+'/')&&v[ref.field]===ref.value).map(([k])=>snap(k))}:snap(ref.key);
  const db={collection:name=>({doc:id=>({key:name+'/'+id,get:async()=>snap(name+'/'+id)}),where:(f,op,v)=>query(name,f,v)}),runTransaction:fn=>{
@@ -158,4 +158,50 @@ test('ineligible and checking members do not see offers',()=>{
 test('pending or purchased offer checkbox is disabled',()=>{
  const html=renderOffers({status:'eligible',purchasingEnabled:true,unavailableOfferIds:['trial_yoga']});
  assert.match(html,/已申請或已購買/);assert.match(html,/type="checkbox"[^>]* disabled=""/);
+});
+
+function verifiedLegacy(f, patch={}) {
+ Object.assign(f.data.get('users/student'), { legacyMemberId:'old',legacyClaimedAt:1,isNewStudent:false,newStudentEligibilityVerified:true,newStudentEligibilityReason:'legacy_member' });
+ f.data.set('legacyMembers/old',{phoneNormalized:'0912345678',status:'claimed',claimedBy:'student',purchaseHistoryStatus:'never_purchased',purchaseHistoryVerifiedBy:'admin',purchaseHistoryVerifiedAt:1,...patch});
+ f.data.set('legacyClaimRequests/student',{uid:'student',status:'approved',legacyMemberId:'old'});
+}
+test('registered-only legacy member can buy and receive all new-student offers once',async()=>{
+ const f=fixture();verifiedLegacy(f);const r=await basket(f,ids);assert.equal(r.status,200);assert.equal((await approveBasket(f,ids)).status,200);
+ assert.equal(f.data.get('users/student').points,12);assert.equal((await f.buy('trial_yoga')).status,400);
+});
+test('legacy identity does not block confirmed never-purchased account eligibility',async()=>{
+ const f=fixture();verifiedLegacy(f);const r=await f.eligibility(f.request({},'student'));assert.equal((await r.json()).status,'eligible');assert.equal(f.data.get('users/student').isNewStudent,true);
+});
+test('unverified historical purchase status stays pending even when balance is zero',async()=>{
+ const f=fixture();verifiedLegacy(f,{purchaseHistoryStatus:'unknown'});const r=await f.eligibility(f.request({},'student'));const result=await r.json();assert.equal(result.status,'pending');assert.equal(result.reason,'legacy_purchase_history_pending');assert.equal((await f.buy()).status,400);
+});
+test('a never-purchased status without verification provenance is not sufficient',async()=>{
+ const f=fixture();verifiedLegacy(f);delete f.data.get('legacyMembers/old').purchaseHistoryVerifiedBy;const result=await (await f.eligibility(f.request({},'student'))).json();assert.equal(result.status,'pending');
+});
+test('legacy purchaser remains ineligible even after using every point',async()=>{
+ const f=fixture();verifiedLegacy(f,{purchaseHistoryStatus:'purchased'});const result=await (await f.eligibility(f.request({},'student'))).json();assert.equal(result.status,'ineligible');assert.equal(result.reason,'legacy_purchase');assert.equal((await f.buy()).status,400);
+});
+test('old general purchases found by legacy ID override no-purchase assertion',async()=>{
+ const f=fixture();verifiedLegacy(f);f.data.set('packageSales/old-sale',{studentId:'old'});assert.equal((await f.buy()).status,400);
+});
+test('old general purchases linked by legacyMemberId override assertion at approval',async()=>{
+ const f=fixture();verifiedLegacy(f);assert.equal((await f.buy()).status,200);f.data.set('packageSales/old-sale',{legacyMemberId:'old'});assert.equal((await f.finish()).status,400);assert.equal(f.data.has('trialVouchers/new_student_student_trial_yoga'),false);
+});
+test('historical purchase discovered between submission and approval prevents issuance',async()=>{
+ const f=fixture();verifiedLegacy(f);await f.buy('starter_12');f.data.get('legacyMembers/old').purchaseHistoryStatus='purchased';assert.equal((await f.finish('starter_12')).status,400);assert.equal(f.data.get('users/student').points,0);
+});
+test('all matching legacy records must have verified no-purchase history',async()=>{
+ const f=fixture();verifiedLegacy(f);f.data.set('legacyMembers/other-old',{phoneNormalized:'0912345678'});assert.equal((await f.buy()).status,400);
+});
+test('approved claim of another member cannot establish eligibility',async()=>{
+ const f=fixture();verifiedLegacy(f,{claimedBy:'other'});assert.equal((await f.buy()).status,400);
+});
+test('pending claim still requires identity review even with no-purchase history',async()=>{
+ const f=fixture();verifiedLegacy(f);f.data.get('legacyClaimRequests/student').status='pending';const result=await (await f.eligibility(f.request({},'student'))).json();assert.equal(result.reason,'legacy_claim_review');assert.equal((await f.buy()).status,400);
+});
+test('missing linked legacy record remains pending rather than becoming new',async()=>{
+ const f=fixture();verifiedLegacy(f);f.data.delete('legacyMembers/old');const result=await (await f.eligibility(f.request({},'student'))).json();assert.equal(result.status,'pending');
+});
+test('verified legacy history does not reset a consumed general benefit',async()=>{
+ const f=fixture();verifiedLegacy(f);f.data.get('users/student').newStudentEligibilityReason='eligibility_consumed';assert.equal((await f.buy()).status,400);
 });

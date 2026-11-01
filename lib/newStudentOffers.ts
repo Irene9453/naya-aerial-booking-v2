@@ -40,9 +40,7 @@ export function isNewStudentOfferId(
 // Share one eligibility policy between submission and payment approval.
 export function isEligibleNewStudent(user: Record<string, unknown>) {
   return user.role === "student" && user.isNewStudent === true &&
-    user.newStudentEligibilityVerified === true &&
-    !user.legacyMemberId && !user.legacyClaimedAt &&
-    user.legacyStatus !== "claimed";
+    user.newStudentEligibilityVerified === true;
 }
 
 export function hasPurchasedNewStudentOffer(

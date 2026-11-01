@@ -30,6 +30,8 @@ type LegacyMember = {
   coupons?: LegacyCoupon[];
   status: "unclaimed" | "claimed";
   claimedBy?: string;
+  purchaseHistoryStatus: "unknown" | "never_purchased" | "purchased";
+  purchaseHistoryEvidence: string;
 };
 
 type StatusFilter = "all" | "unclaimed" | "claimed";
@@ -84,6 +86,11 @@ async function adminPost(path: string, body: unknown): Promise<ApiResult> {
 
 export function AdminLegacyMemberManager() {
   const [members, setMembers] = useState<LegacyMember[]>([]);
+  const [historyMember, setHistoryMember] = useState<LegacyMember | null>(null);
+  const [historyStatus, setHistoryStatus] = useState<LegacyMember["purchaseHistoryStatus"]>("unknown");
+  const [historyEvidence, setHistoryEvidence] = useState("");
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyMessage, setHistoryMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
@@ -143,6 +150,8 @@ export function AdminLegacyMemberManager() {
     ? "claimed"
     : "unclaimed",
             claimedBy: data.claimedBy ? String(data.claimedBy) : undefined,
+            purchaseHistoryStatus: data.purchaseHistoryStatus === "never_purchased" || data.purchaseHistoryStatus === "purchased" ? data.purchaseHistoryStatus : "unknown",
+            purchaseHistoryEvidence: String(data.purchaseHistoryEvidence ?? ""),
           } satisfies LegacyMember;
         }));
         setIsLoading(false);
@@ -339,6 +348,18 @@ export function AdminLegacyMemberManager() {
       setIsBatchSaving(false);
     }
   }
+ async function savePurchaseHistory() {
+    if (!historyMember) return;
+    setHistoryBusy(true); setHistoryMessage("");
+    try {
+      await adminPost("/api/admin/legacy-members/purchase-history", {
+        legacyMemberId: historyMember.id, status: historyStatus, evidence: historyEvidence,
+      });
+      setHistoryMember(null);
+      setMessage("購課紀錄已儲存。會員可至新生優惠重新確認資格，系統仍會核對一般購課紀錄與各項限購。");
+    } catch (error) { setHistoryMessage(error instanceof Error ? error.message : "儲存失敗。"); }
+    finally { setHistoryBusy(false); }
+  }
  return (
   <section className="mt-8 rounded-3xl bg-white p-7 shadow-sm md:p-8">
     <AdminLegacyClaimReview />
@@ -367,11 +388,16 @@ export function AdminLegacyMemberManager() {
       {isLoading ? <p className="mt-6 text-sm text-slate-500">舊會員資料載入中……</p> : filteredMembers.length === 0 ? <p className="mt-6 rounded-2xl bg-slate-50 p-5 text-sm text-slate-500">目前找不到符合的舊會員資料。</p> : (
         <div className="mt-6 overflow-x-auto">
           <table className="w-full min-w-[900px] text-left text-sm">
-            <thead><tr className="border-b border-slate-200 text-slate-500"><th className="px-3 py-3">狀態</th><th className="px-3 py-3">姓名</th><th className="px-3 py-3">手機</th><th className="px-3 py-3">生日</th><th className="px-3 py-3">課程點數</th><th className="px-3 py-3">紅利點數</th><th className="px-3 py-3">操作</th></tr></thead>
+            <thead><tr className="border-b border-slate-200 text-slate-500"><th className="px-3 py-3">狀態</th><th className="px-3 py-3">姓名</th><th className="px-3 py-3">手機</th><th className="px-3 py-3">生日</th><th className="px-3 py-3">課程點數</th><th className="px-3 py-3">紅利點數</th><th className="px-3 py-3">購課紀錄</th><th className="px-3 py-3">操作</th></tr></thead>
             <tbody>{filteredMembers.map((member) => (
               <tr key={member.id} className="border-b border-slate-100">
                 <td className="px-3 py-4">{member.status === "claimed" ? <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">已認領</span> : <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">待認領</span>}</td>
                 <td className="px-3 py-4 font-semibold text-slate-800">{member.name || "—"}</td><td className="px-3 py-4 text-slate-600">{member.phoneNormalized || member.phone || "—"}</td><td className="px-3 py-4 text-slate-600">{formatBirthday(member)}</td><td className="px-3 py-4 font-semibold text-sky-700">{member.points}</td><td className="px-3 py-4 text-violet-700">{member.rewardPoints}</td>
+                <td className="px-3 py-4"><button type="button" onClick={() => {
+                  setHistoryMember(member); setHistoryStatus(member.purchaseHistoryStatus); setHistoryEvidence(member.purchaseHistoryEvidence); setHistoryMessage("");
+                }} className="rounded-lg border border-sky-300 px-3 py-2 font-semibold text-sky-800">
+                  {member.purchaseHistoryStatus === "never_purchased" ? "從未購課" : member.purchaseHistoryStatus === "purchased" ? "曾購課" : "待確認"}｜核對
+                </button></td>
                 <td className="px-3 py-4">{member.status === "unclaimed" ? <div className="flex gap-2"><button type="button" onClick={() => openEdit(member)} className="rounded-lg border border-violet-200 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50">編輯</button><button type="button" onClick={() => setDeletingMember(member)} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50">刪除</button></div> : <span className="text-xs text-slate-400">已鎖定</span>}</td>
               </tr>
             ))}</tbody>
@@ -381,6 +407,18 @@ export function AdminLegacyMemberManager() {
 
       {message && <p className={`mt-5 text-sm ${message.includes("失敗") || message.includes("無法") ? "text-red-600" : "text-emerald-700"}`}>{message}</p>}
 
+      {historyMember && <div className="fixed inset-0 z-[330] flex items-center justify-center overflow-y-auto bg-slate-900/60 p-4">
+        <div className="w-full max-w-lg rounded-3xl bg-white p-6 text-slate-900">
+          <h3 className="text-xl font-bold">{historyMember.name}｜舊系統購課紀錄</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-700">僅註冊、從未購課者可符合新生優惠；點數歸零不代表從未購課。請核對舊系統購課或收款紀錄後再設定。</p>
+          <label className="mt-4 block font-semibold">購課狀態<select disabled={historyBusy} value={historyStatus} onChange={event => setHistoryStatus(event.target.value as LegacyMember["purchaseHistoryStatus"])} className="mt-2 w-full rounded-xl border border-slate-300 p-3">
+            <option value="unknown">待確認</option><option value="never_purchased">僅註冊，從未購課</option><option value="purchased">曾經購課</option>
+          </select></label>
+          <label className="mt-4 block font-semibold">核對依據（10～500 字）<textarea disabled={historyBusy} value={historyEvidence} onChange={event => setHistoryEvidence(event.target.value)} maxLength={500} rows={4} className="mt-2 w-full rounded-xl border border-slate-300 p-3" placeholder="例如：已核對舊系統完整交易紀錄，僅有註冊資料，沒有購課或付款紀錄。" /></label>
+          {historyMessage && <p role="status" className="mt-3 text-red-700">{historyMessage}</p>}
+          <div className="mt-5 flex justify-end gap-3"><button type="button" disabled={historyBusy} onClick={() => setHistoryMember(null)} className="rounded-xl border px-4 py-3">取消</button><button type="button" disabled={historyBusy || historyEvidence.trim().length < 10} onClick={() => void savePurchaseHistory()} className="rounded-xl bg-sky-700 px-4 py-3 font-semibold text-white disabled:bg-slate-300">{historyBusy ? "儲存中……" : "儲存核對結果"}</button></div>
+        </div>
+      </div>}
       {editingMember && <div className="fixed inset-0 z-[300] flex items-center justify-center overflow-y-auto bg-slate-900/60 px-4 py-8"><div className="w-full max-w-2xl rounded-3xl bg-white p-7 shadow-2xl md:p-9">
         <div className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-600">Edit Legacy Member</p><h3 className="mt-2 text-2xl font-bold text-slate-900">編輯待認領舊會員</h3></div><button type="button" onClick={() => setEditingMember(null)} disabled={isSavingEdit} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600">關閉</button></div>
         <div className="mt-7 grid gap-5 sm:grid-cols-2"><Field label="姓名" value={editName} setValue={setEditName}/><Field label="手機" value={editPhone} setValue={setEditPhone}/></div>
