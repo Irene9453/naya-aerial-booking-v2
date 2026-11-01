@@ -52,3 +52,19 @@ export function hasPurchasedNewStudentOffer(
   return purchases !== null && typeof purchases === "object" &&
     (purchases as Record<string, unknown>)[offerId] === true;
 }
+
+// Canonical ordering makes retries and differently ordered selections share an ID.
+export function parseNewStudentOfferIds(value: unknown): NewStudentOfferId[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 3 ||
+      !value.every(isNewStudentOfferId) || new Set(value).size !== value.length) return null;
+  return [...value].sort();
+}
+
+export function summarizeNewStudentOffers(ids: NewStudentOfferId[]) {
+  return {
+    name: ids.map(id => NEW_STUDENT_OFFERS[id].name).join("＋"),
+    price: ids.reduce((sum, id) => sum + NEW_STUDENT_OFFERS[id].price, 0),
+    points: ids.reduce((sum, id) => sum + NEW_STUDENT_OFFERS[id].points, 0),
+    vouchers: ids.filter(id => NEW_STUDENT_OFFERS[id].points === 0).length,
+  };
+}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
-import { NEW_STUDENT_OFFERS, isNewStudentOfferId, isEligibleNewStudent, hasPurchasedNewStudentOffer } from "@/lib/newStudentOffers";
+import { NEW_STUDENT_OFFERS, parseNewStudentOfferIds, summarizeNewStudentOffers, isEligibleNewStudent, hasPurchasedNewStudentOffer } from "@/lib/newStudentOffers";
 
 import { readNewStudentEligibility, eligibilityUserFields } from "@/lib/newStudentEligibility";
 
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     }
     const requestId = body && typeof body === "object" && "requestId" in body
       ? (body as { requestId?: unknown }).requestId : null;
-    if (typeof requestId !== "string" || !/^new_student_[^/]+_(trial_yoga|trial_aerial|starter_12)$/.test(requestId)) {
+    if (typeof requestId !== "string" || (!requestId.startsWith("new_student_") || requestId.includes("/"))) {
       return NextResponse.json({ error: "新生訂單編號不正確" }, { status: 400 });
     }
     const orderRef = adminDb.collection("purchaseRequests").doc(requestId);
@@ -55,19 +55,26 @@ export async function POST(request: NextRequest) {
       if (!orderSnap.exists) throw new Error("找不到購買申請");
       const order = orderSnap.data()!;
       const userId = String(order.userId ?? "");
-      const offerId = order.offerId;
-      if (userId !== studentId || !userId || userId.includes("/") || !isNewStudentOfferId(offerId) ||
-          requestId !== `new_student_${userId}_${offerId}` || order.offerType !== "new_student") {
+      const offerIds = parseNewStudentOfferIds(order.offerIds ?? [order.offerId]);
+      if (userId !== studentId || !userId || userId.includes("/") || !offerIds ||
+          requestId !== `new_student_${userId}_${offerIds.join("+")}` || order.offerType !== "new_student") {
         throw new Error("新生訂單資料不正確");
       }
       const userRef = adminDb.collection("users").doc(userId);
-      const saleRef = adminDb.collection("packageSales").doc(`request_${requestId}`);
-      const transactionRef = adminDb.collection("pointTransactions").doc(`request_${requestId}`);
-      const voucherRef = adminDb.collection("trialVouchers").doc(`new_student_${userId}_${offerId}`);
       const noticeRef = adminDb.collection("notifications").doc(`request_${requestId}`);
-      const [userSnap, saleSnap, voucherSnap] = await Promise.all([
-        tx.get(userRef), tx.get(saleRef), tx.get(voucherRef),
-      ]);
+      const userSnap = await tx.get(userRef);
+      const checks = [];
+      for (const id of offerIds) {
+        const key = `new_student_${userId}_${id}`;
+        const saleRef = adminDb.collection("packageSales").doc(`request_${key}`);
+        const voucherRef = adminDb.collection("trialVouchers").doc(key);
+        const transactionRef = adminDb.collection("pointTransactions").doc(`request_${key}`);
+        const claim = await tx.get(adminDb.collection("newStudentOfferClaims").doc(key));
+        const sale = await tx.get(saleRef);
+        const voucher = await tx.get(voucherRef);
+        const pointTransaction = await tx.get(transactionRef);
+        checks.push({ id, saleRef, voucherRef, transactionRef, claim, sale, voucher, pointTransaction });
+      }
       if (!userSnap.exists) throw new Error("找不到會員資料");
       const rawUser = userSnap.data()!;
       const eligibility = await readNewStudentEligibility(tx, userId, rawUser);
@@ -78,11 +85,17 @@ export async function POST(request: NextRequest) {
       if (order.status !== "pending" || order.paymentStatus !== "unpaid") {
         throw new Error("訂單並非待核准狀態");
       }
-      if (hasPurchasedNewStudentOffer(user, offerId) || saleSnap.exists || voucherSnap.exists) {
-        throw new Error("此項優惠已發放過");
+      for (const check of checks) {
+        if (hasPurchasedNewStudentOffer(user, check.id) || check.sale.exists || check.voucher.exists || check.pointTransaction.exists) {
+          throw new Error("此項優惠已發放過");
+        }
+        if ((order.offerIds && !check.claim.exists) ||
+            (check.claim.exists && check.claim.data()?.requestId !== requestId)) {
+          throw new Error("新生訂單資料不正確");
+        }
       }
-      const offer = NEW_STUDENT_OFFERS[offerId];
-      if (order.packageId !== `new_student_${offerId}` ||
+      const offer = summarizeNewStudentOffers(offerIds);
+      if (order.packageId !== `new_student_${offerIds.join("+")}` ||
           order.packageName !== offer.name || order.packagePoints !== offer.points ||
           order.originalPrice !== offer.price || order.finalPrice !== offer.price ||
           order.discountAmount !== 0 ||
@@ -99,40 +112,43 @@ export async function POST(request: NextRequest) {
       if (!Number.isSafeInteger(pointsAfter)) throw new Error("會員點數異常");
 
       // Separate per-offer claims; do not reset isNewStudent (reserved for regular package logic).
-      tx.update(userRef, { ...eligibilityUserFields(eligibility), points: pointsAfter, [`newStudentOfferPurchases.${offerId}`]: true });
+      tx.update(userRef, { ...eligibilityUserFields(eligibility), points: pointsAfter,
+        ...Object.fromEntries(offerIds.map(id => [`newStudentOfferPurchases.${id}`, true])),
+      });
       tx.update(orderRef, {
         status: "completed", paymentStatus: "confirmed", reviewedBy: adminId,
         reviewedAt: FieldValue.serverTimestamp(), completedAt: FieldValue.serverTimestamp(),
         pointBalanceAfter: pointsAfter,
       });
-      tx.create(saleRef, {
-        requestId, adminId, studentId: userId, offerId, offerType: "new_student",
-        packageId: order.packageId, packageName: offer.name, points: offer.points,
-        originalPrice: offer.price, discountAmount: 0, price: offer.price,
-        paymentMethod: order.paymentMethod ?? "", transferLastFive: order.transferLastFive ?? null,
-        status: "completed", createdAt: FieldValue.serverTimestamp(),
-      });
-      if (offer.points > 0) {
-        tx.create(transactionRef, {
-          userId, adminId, requestId, packageId: order.packageId, packageName: offer.name,
-          type: "new_student_package_purchase", amount: offer.points, balanceAfter: pointsAfter,
-          createdAt: FieldValue.serverTimestamp(),
+      for (const check of checks) {
+        const item = NEW_STUDENT_OFFERS[check.id];
+        tx.create(check.saleRef, {
+          requestId, adminId, studentId: userId, offerId: check.id, offerType: "new_student",
+          packageId: `new_student_${check.id}`, packageName: item.name, points: item.points,
+          originalPrice: item.price, discountAmount: 0, price: item.price,
+          paymentMethod: order.paymentMethod, transferLastFive: order.transferLastFive ?? null,
+          status: "completed", createdAt: FieldValue.serverTimestamp(),
         });
-      } else {
-        tx.create(voucherRef, {
-          userId, offerId, kind: offer.entitlement, status: "available", quantity: 1,
-          purchaseRequestId: requestId, issuedAt: FieldValue.serverTimestamp(),
-          usedAt: null, bookingId: null,
-        });
+        if (item.points > 0) {
+          tx.create(check.transactionRef, {
+            userId, adminId, requestId, packageId: `new_student_${check.id}`, packageName: item.name,
+            type: "new_student_package_purchase", amount: item.points, balanceAfter: pointsAfter,
+            createdAt: FieldValue.serverTimestamp(),
+          });
+        } else {
+          tx.create(check.voucherRef, {
+            userId, offerId: check.id, kind: item.entitlement, status: "available", quantity: 1,
+            purchaseRequestId: requestId, issuedAt: FieldValue.serverTimestamp(), usedAt: null, bookingId: null,
+          });
+        }
       }
       tx.create(noticeRef, {
         userId, requestId, type: "package_purchase", title: "新生優惠購買完成",
-        body: offer.points > 0 ? `已收到款項，${offer.name} 已加入 ${offer.points} 點。` :
-          `已收到款項，${offer.name} 體驗券已發放。預約功能完成後即可使用。`,
+        body: `已收到款項，已發放 ${offer.points} 點與 ${offer.vouchers} 張體驗券。`,
         isRead: false, createdAt: FieldValue.serverTimestamp(),
       });
       return { packageName: offer.name, pointsAdded: offer.points, pointsAfter,
-        voucherIssued: offer.points === 0 };
+        voucherIssued: offer.vouchers > 0 };
     });
     return NextResponse.json({ success: true, ...result });
   } catch (error) {

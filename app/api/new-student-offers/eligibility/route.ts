@@ -1,3 +1,4 @@
+import { NEW_STUDENT_OFFERS, hasPurchasedNewStudentOffer, type NewStudentOfferId } from "@/lib/newStudentOffers";
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 import { readNewStudentEligibility, eligibilityUserFields } from "@/lib/newStudentEligibility";
@@ -21,8 +22,20 @@ export async function POST(request: NextRequest) {
       const snapshot = await tx.get(userRef);
       if (!snapshot.exists) return null;
       const result = await readNewStudentEligibility(tx, uid, snapshot.data()!);
+      const unavailableOfferIds: NewStudentOfferId[] = [];
+      for (const id of Object.keys(NEW_STUDENT_OFFERS) as NewStudentOfferId[]) {
+        const key = `new_student_${uid}_${id}`;
+        const claim = await tx.get(adminDb.collection("newStudentOfferClaims").doc(key));
+        const requestId = claim.data()?.requestId;
+        const linked = typeof requestId === "string"
+          ? await tx.get(adminDb.collection("purchaseRequests").doc(requestId)) : null;
+        const oldOrder = await tx.get(adminDb.collection("purchaseRequests").doc(key));
+        if (hasPurchasedNewStudentOffer(snapshot.data()!, id) ||
+            (linked?.exists && linked.data()?.status !== "rejected") ||
+            (oldOrder.exists && oldOrder.data()?.status !== "rejected")) unavailableOfferIds.push(id);
+      }
       tx.update(userRef, eligibilityUserFields(result));
-      return result;
+      return { ...result, unavailableOfferIds };
     });
     if (!result) return NextResponse.json({ error: "找不到會員資料" }, { status: 404 });
     return NextResponse.json({ ...result, purchasingEnabled: process.env.NAYA_NEW_STUDENT_APPROVAL_ENABLED === "true" });

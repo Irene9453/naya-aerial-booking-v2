@@ -30,6 +30,7 @@ type PurchaseRequestData = {
 
   packageName: string;
   packagePoints: number;
+  entitlementSummary: string;
 
   originalPrice: number;
   discountAmount: number;
@@ -218,6 +219,7 @@ export default function AdminPurchaseRequests() {
                       data.packageName ?? ""
                     ),
 
+                    entitlementSummary: String(data.entitlementSummary ?? ""),
                     packagePoints: Number(
                       data.packagePoints ?? 0
                     ),
@@ -370,7 +372,7 @@ export default function AdminPurchaseRequests() {
         const result: { error?: string; packageName?: string; voucherIssued?: boolean; pointsAdded?: number } =
           await response.json();
         if (!response.ok) throw new Error(result.error ?? "核准失敗");
-        setMessage(`購買完成！${request.studentName} 已獲得 ${result.packageName}${result.voucherIssued ? "體驗券" : `，增加 ${result.pointsAdded} 點`}。`);
+        setMessage(`購買完成！${request.studentName} 已獲得 ${request.entitlementSummary || (result.voucherIssued ? "體驗券 1 張" : `${result.pointsAdded} 點`)}。`);
       } else {
         const result = await completePurchaseRequest({
           requestId: request.id,
@@ -623,7 +625,7 @@ export default function AdminPurchaseRequests() {
                     </p>
 
                     <p className="mt-1 font-bold text-slate-900">
-                      {request.offerType === "new_student" && request.packagePoints === 0 ? "單堂體驗券 × 1" : `${request.packagePoints} 點`}
+                      {request.entitlementSummary || (request.offerType === "new_student" && request.packagePoints === 0 ? "單堂體驗券 × 1" : `${request.packagePoints} 點`)}
                     </p>
                   </div>
 

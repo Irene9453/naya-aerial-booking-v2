@@ -18,6 +18,7 @@ type PurchaseRequestData = {
   id: string;
   packageName: string;
   packagePoints: number;
+  entitlementSummary: string;
   originalPrice: number;
   discountAmount: number;
   finalPrice: number;
@@ -169,7 +170,8 @@ export default function MyPurchaseRequests({
             return {
               id: requestDocument.id,
               packageName: String(data.packageName ?? ""),
-              packagePoints: Number(data.packagePoints ?? 0),
+              entitlementSummary: String(data.entitlementSummary ?? ""),
+                    packagePoints: Number(data.packagePoints ?? 0),
               originalPrice: Number(data.originalPrice ?? 0),
               discountAmount: Number(data.discountAmount ?? 0),
               finalPrice: Number(data.finalPrice ?? 0),
@@ -274,17 +276,17 @@ export default function MyPurchaseRequests({
                 </div>
 
                 <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                  {isTrialVoucher && request.status === "completed" ? "款項已確認，單堂體驗券已發放至會員帳戶。" : statusInfo.description}
+                  {(isTrialVoucher || request.entitlementSummary) && request.status === "completed" ? "款項已確認，所購點數或體驗券已發放至會員帳戶。" : statusInfo.description}
                 </p>
 
                 <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   <div>
                     <p className="text-xs font-semibold text-slate-400">
-                      {isTrialVoucher ? "發放權益" : "課卡點數"}
+                      {isTrialVoucher || request.entitlementSummary ? "發放權益" : "課卡點數"}
                     </p>
 
                     <p className="mt-1 font-bold text-slate-900">
-                      {isTrialVoucher ? "單堂體驗券 1 張" : `${request.packagePoints} 點`}
+                      {request.entitlementSummary || (isTrialVoucher ? "單堂體驗券 1 張" : `${request.packagePoints} 點`)}
                     </p>
                   </div>
 

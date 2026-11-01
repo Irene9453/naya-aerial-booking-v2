@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 import {
-  NEW_STUDENT_OFFERS,
-  isNewStudentOfferId,
+  parseNewStudentOfferIds,
+  summarizeNewStudentOffers,
   isEligibleNewStudent,
   hasPurchasedNewStudentOffer,
 } from "@/lib/newStudentOffers";
@@ -44,9 +44,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "申請內容不正確" }, { status: 400 });
     }
     const fields = body as Record<string, unknown>;
-    const { offerId, paymentMethod, transferLastFive } = fields;
+    const { paymentMethod, transferLastFive } = fields;
+    const offerIds = parseNewStudentOfferIds(fields.offerIds ?? [fields.offerId]);
 
-    if (!isNewStudentOfferId(offerId)) {
+    if (!offerIds) {
       return NextResponse.json({ error: "無效的新生優惠商品" }, { status: 400 });
     }
     if (typeof paymentMethod !== "string" || !PAYMENT_METHODS.has(paymentMethod)) {
@@ -59,21 +60,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "請填寫轉出帳號末五碼" }, { status: 400 });
     }
 
-    const offer = NEW_STUDENT_OFFERS[offerId];
-    // 固定文件 ID：每位會員、每項優惠永遠只有一筆申請紀錄。
-    // 拒絕後可重新提出，但完成後不能再次購買。
-    const requestId = `new_student_${userId}_${offerId}`;
+    const offer = summarizeNewStudentOffers(offerIds);
+    const requestId = `new_student_${userId}_${offerIds.join("+")}`;
     const requestRef = adminDb.collection("purchaseRequests").doc(requestId);
     const userRef = adminDb.collection("users").doc(userId);
-
-    const saleRef = adminDb.collection("packageSales").doc(`request_${requestId}`);
-    const voucherRef = adminDb.collection("trialVouchers").doc(requestId);
 
     const result = await adminDb.runTransaction(async (tx) => {
       const userSnap = await tx.get(userRef);
       const existingSnap = await tx.get(requestRef);
-      const saleSnap = await tx.get(saleRef);
-      const voucherSnap = await tx.get(voucherRef);
+      // All reads precede writes. Per-offer claims serialize overlapping baskets.
+      const checks = [];
+      for (const id of offerIds) {
+        const key = `new_student_${userId}_${id}`;
+        const claimRef = adminDb.collection("newStudentOfferClaims").doc(key);
+        const claim = await tx.get(claimRef);
+        const previousId = claim.data()?.requestId;
+        const previous = typeof previousId === "string"
+          ? await tx.get(adminDb.collection("purchaseRequests").doc(previousId)) : null;
+        const oldOrder = await tx.get(adminDb.collection("purchaseRequests").doc(key));
+        const sale = await tx.get(adminDb.collection("packageSales").doc(`request_${key}`));
+        const voucher = await tx.get(adminDb.collection("trialVouchers").doc(key));
+        checks.push({ id, claimRef, previous, oldOrder, sale, voucher });
+      }
 
       if (!userSnap.exists) throw new Error("找不到會員資料");
       const rawUserData = userSnap.data()!;
@@ -82,8 +90,14 @@ export async function POST(request: NextRequest) {
       if (!isEligibleNewStudent(userData)) {
         throw new Error("此會員不符合新生優惠資格");
       }
-      if (hasPurchasedNewStudentOffer(userData, offerId) || saleSnap.exists || voucherSnap.exists) {
-        throw new Error("此項新生優惠已購買過");
+      for (const check of checks) {
+        if (hasPurchasedNewStudentOffer(userData, check.id) || check.sale.exists || check.voucher.exists) {
+          throw new Error("此項新生優惠已購買過");
+        }
+        if ((check.previous?.exists && check.previous.data()?.status !== "rejected") ||
+            (check.oldOrder.exists && check.oldOrder.data()?.status !== "rejected")) {
+          throw new Error("已有此項優惠的待處理申請");
+        }
       }
 
       if (existingSnap.exists) {
@@ -94,9 +108,10 @@ export async function POST(request: NextRequest) {
 
       const order = {
         userId,
-        offerId,
+        offerIds,
+        entitlementSummary: `${offer.points} 點、體驗券 ${offer.vouchers} 張`,
         offerType: "new_student",
-        packageId: `new_student_${offerId}`,
+        packageId: `new_student_${offerIds.join("+")}`,
         packageName: offer.name,
         packagePoints: offer.points,
         originalPrice: offer.price,
@@ -117,10 +132,11 @@ export async function POST(request: NextRequest) {
         completedAt: null,
         createdAt: FieldValue.serverTimestamp(),
       };
+      for (const check of checks) tx.set(check.claimRef, { userId, requestId, offerId: check.id });
       tx.update(userRef, eligibilityUserFields(eligibility));
       if (existingSnap.exists) tx.set(requestRef, order);
       else tx.create(requestRef, order);
-      return { requestId, offerId, finalPrice: offer.price };
+      return { requestId, offerIds, finalPrice: offer.price };
     });
 
     return NextResponse.json({ success: true, ...result });
