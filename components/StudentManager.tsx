@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, doc, getDocs, query, runTransaction, serverTimestamp, where } from "firebase/firestore";
+import { collection, doc, getDocs, onSnapshot, query, runTransaction, serverTimestamp, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 import AdminPointButton from "@/components/AdminPointButton";
@@ -77,12 +77,11 @@ export default function StudentManager({
   // NAYA_COUPON_AVAILABLE_COUNTS
   const [couponCounts, setCouponCounts] = useState<Record<string, number>>({});
 
-  useEffect(() => {
-    let cancelled = false;
+  const [couponCountsLoaded, setCouponCountsLoaded] = useState(false);
+  const [couponCountsError, setCouponCountsError] = useState(false);
 
-    async function loadCouponCounts() {
-      try {
-        const snapshot = await getDocs(collection(db, "userCoupons"));
+  useEffect(() => {
+    return onSnapshot(collection(db, "userCoupons"), snapshot => {
         const counts: Record<string, number> = {};
 
         for (const item of snapshot.docs) {
@@ -96,20 +95,15 @@ export default function StudentManager({
           }
         }
 
-        if (!cancelled) {
-          setCouponCounts(counts);
-        }
-      } catch (error) {
-        console.error("載入會員優惠券張數失敗：", error);
-      }
-    }
-
-    void loadCouponCounts();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [students]);
+        setCouponCounts(counts);
+        setCouponCountsLoaded(true);
+        setCouponCountsError(false);
+    }, error => {
+      console.error("載入會員優惠券張數失敗：", error);
+      setCouponCountsError(true);
+      setCouponCountsLoaded(false);
+    });
+  }, []);
   // NAYA_MEMBER_COUPON_COLUMN
   const [couponStudent, setCouponStudent] = useState<StudentData | null>(null);
   const [memberCoupons, setMemberCoupons] = useState<Record<string, unknown>[]>([]);
@@ -844,7 +838,7 @@ phone:
                       onClick={() => void openMemberCoupons(student)}
                       className="rounded-xl border border-pink-300 px-3 py-2 text-sm font-semibold text-pink-700 hover:bg-pink-50"
                     >
-                      可用 {couponCounts[student.id] ?? 0} 張｜查看優惠券
+                      {couponCountsError ? "張數讀取失敗" : !couponCountsLoaded ? "張數載入中…" : `可用 ${couponCounts[student.id] ?? 0} 張`}｜查看優惠券
                     </button>
                   </td>
 
@@ -1215,7 +1209,7 @@ phone:
 
                 {memberCoupons.length === 0 ? (
                   <p className="mt-3 rounded-xl bg-slate-50 p-5 text-center text-slate-500">
-                    目前沒有查到優惠券。
+                    此會員帳戶目前沒有已移轉的優惠券；舊會員匯入券請至「舊會員優惠券核對」確認。
                   </p>
                 ) : (
                   <div className="mt-3 max-h-[55vh] space-y-3 overflow-y-auto">

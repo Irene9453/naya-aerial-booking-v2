@@ -3,6 +3,7 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  color-scheme: light;
 }
 
 @theme inline {
@@ -12,15 +13,28 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* The app uses light cards. Keep labels readable on phones, including dark-mode devices. */
+@media (max-width: 767px) {
+  :is(.text-slate-300, .text-slate-400, .text-slate-500,
+      .text-gray-300, .text-gray-400, .text-gray-500,
+      .text-zinc-300, .text-zinc-400, .text-zinc-500,
+      .text-neutral-300, .text-neutral-400, .text-neutral-500,
+      .text-stone-300, .text-stone-400, .text-stone-500):not(:where(
+        .bg-slate-800, .bg-slate-800 *, .bg-slate-900, .bg-slate-900 *,
+        .bg-slate-950, .bg-slate-950 *, .bg-gray-900, .bg-gray-900 *,
+        .bg-black, .bg-black *)) {
+    color: #475569;
+  }
+
+  input::placeholder, textarea::placeholder {
+    color: #64748b;
+    opacity: 1;
+  }
 }

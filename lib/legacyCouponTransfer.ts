@@ -5,6 +5,8 @@ import {
   type DocumentReference,
 } from "firebase-admin/firestore";
 
+import { couponTemplateFields } from "@/lib/couponTemplate";
+
 export type LegacyCoupon = {
   couponId: string;
   quantity: number;
@@ -83,14 +85,10 @@ export async function prepareLegacyCouponTransfer(
     }
 
     const template = templateSnapshot.data() ?? {};
-    const discountRate = template.discountRate;
-
-    if (
-      typeof discountRate !== "number" ||
-      !Number.isFinite(discountRate) ||
-      discountRate <= 0 ||
-      discountRate > 1
-    ) {
+    let fields;
+    try {
+      fields = couponTemplateFields(template);
+    } catch {
       throw new Error("INVALID_LEGACY_COUPONS");
     }
 
@@ -110,9 +108,7 @@ export async function prepareLegacyCouponTransfer(
         data: {
           userId: uid,
           couponId: coupon.couponId,
-          name: String(template.name ?? "優惠券"),
-          type: String(template.type ?? "reward"),
-          discountRate,
+          ...fields,
           status: "available",
           rewardCost: 0,
           source: "legacy_claim",

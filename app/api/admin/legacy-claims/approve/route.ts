@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 
+import { prepareLegacyCouponTransfer } from "@/lib/legacyCouponTransfer";
+
 export const runtime = "nodejs";
 
 function apiError(message: string, status: number) {
@@ -30,7 +32,7 @@ export async function POST(request: NextRequest) {
     }
 
     const decoded = await adminAuth.verifyIdToken(
-      header.slice(7)
+      header.slice(7), true
     );
 
     // 2. 確認管理員身分
@@ -111,6 +113,8 @@ if (!claimantAuth.emailVerified) {
 
     // 4. Transaction：所有檢查與移轉一次完成
     const result = await adminDb.runTransaction(async (tx) => {
+      const currentAdmin = await tx.get(adminDb.collection("users").doc(decoded.uid));
+      if (!currentAdmin.exists || currentAdmin.data()?.role !== "admin") throw new Error("FORBIDDEN");
       const claimSnapshot = await tx.get(claimRef);
       const legacySnapshot = await tx.get(legacyRef);
 
@@ -262,7 +266,10 @@ if (!claimantAuth.emailVerified) {
         throw new Error("DUPLICATE_TRANSACTION");
       }
 
+      const couponTransfer = await prepareLegacyCouponTransfer(tx, adminDb, uid, legacyMemberId, legacy.coupons);
+
       // 9. 所有讀取完成後，才開始寫入
+      couponTransfer.write();
       tx.update(userRef, {
         points: newPoints,
         rewardPoints: newRewards,
@@ -274,6 +281,8 @@ if (!claimantAuth.emailVerified) {
 
       tx.update(legacyRef, {
         status: "claimed",
+        couponsTransferred: couponTransfer.count,
+        couponsTransferredAt: FieldValue.serverTimestamp(),
         claimedBy: uid,
         claimedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
@@ -283,6 +292,7 @@ if (!claimantAuth.emailVerified) {
   status: "approved",
   legacyMemberId,
   pointsTransferred: legacyPoints,
+  couponsTransferred: couponTransfer.count,
   rewardPointsTransferred: legacyRewards,
   identityVerificationMethod,
   reviewedBy: decoded.uid,
@@ -315,6 +325,7 @@ if (!claimantAuth.emailVerified) {
 });
 
       return {
+        couponsTransferred: couponTransfer.count,
         pointsTransferred: legacyPoints,
         rewardPointsTransferred: legacyRewards,
         newPointBalance: newPoints,
@@ -324,16 +335,23 @@ if (!claimantAuth.emailVerified) {
 
     return NextResponse.json({
       success: true,
-      message: "舊會員認領已核准，點數移轉完成。",
+      message: "舊會員認領已核准，點數與優惠券移轉完成。",
       ...result,
     });
   } catch (error) {
+    if (error && typeof error === "object" && "code" in error && String(error.code).startsWith("auth/")) {
+      return apiError("登入已失效，請重新登入。", 401);
+    }
     console.error("核准舊會員認領失敗：", error);
 
     const code =
       error instanceof Error ? error.message : "";
 
     const errors: Record<string, [string, number]> = {
+      FORBIDDEN: ["管理員權限已變更，無法核准。", 403],
+      INVALID_LEGACY_COUPONS: ["舊會員優惠券資料異常，請先確認。", 409],
+      LEGACY_COUPON_NOT_FOUND: ["舊會員優惠券商品不存在，請先確認。", 409],
+      DUPLICATE_LEGACY_COUPON: ["已存在舊會員優惠券移轉紀錄，請先核對，避免重複發放。", 409],
       CLAIM_NOT_FOUND: ["找不到認領申請。", 404],
       LEGACY_NOT_FOUND: ["找不到舊會員資料。", 404],
       ALREADY_REVIEWED: ["此申請已審核。", 409],
