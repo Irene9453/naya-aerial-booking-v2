@@ -88,7 +88,18 @@ export default function NewStudentOffers() {
         className="mt-3 rounded-xl border border-amber-300 px-4 py-2 disabled:opacity-50">重新確認資格</button>
       {enabled && (
         <div className="mt-4 flex flex-wrap gap-4">
-          <p>付款方式：銀行轉帳</p>
+          <div className="w-full rounded-xl border border-amber-200 bg-white p-4 text-sm">
+  <p className="font-semibold">付款方式：銀行轉帳</p>
+  <p className="mt-2">銀行：803 聯邦銀行</p>
+  <p className="mt-1">
+    收款帳號：
+    <span className="select-all font-mono">888501184231</span>
+  </p>
+  <p className="mt-2 text-slate-600">
+    請依所選優惠金額完成轉帳，再填寫轉出帳號末五碼並申請購買。
+    老師確認收款後才會發放點數或體驗券。
+  </p>
+</div>
           {paymentMethod === "transfer" && <label>轉出帳號末五碼
             <input value={lastFive} onChange={e => setLastFive(e.target.value.replace(/\D/g, "").slice(0, 5))}
               disabled={busy !== null} inputMode="numeric" maxLength={5} className="ml-2 w-24 rounded border p-2" />
