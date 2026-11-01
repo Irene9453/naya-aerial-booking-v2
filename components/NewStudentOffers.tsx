@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { NEW_STUDENT_OFFERS, type NewStudentOfferId } from "@/lib/newStudentOffers";
@@ -11,6 +11,7 @@ const REASONS: Record<string, string> = {
   history_incomplete: "舊會員資料尚未完成核對，優惠資格待確認；其他會員功能不受影響。",
   phone_registry_mismatch: "手機綁定資料需要確認，請聯絡老師。",
   legacy_claim_review: "舊會員認領紀錄需要確認，請聯絡老師確認優惠資格。",
+  eligibility_unavailable: "暫時無法更新資格，請按重新確認資格；目前不會送出購買。",
   legacy_purchase: "已有舊系統購課紀錄，不適用新生優惠。",
   legacy_purchase_history_pending: "舊系統購課紀錄待確認；若僅註冊、從未購課，請聯絡老師核對。",
   legacy_identity_conflict: "舊會員綁定資料需要核對，請聯絡老師。",
@@ -21,6 +22,8 @@ const REASONS: Record<string, string> = {
 };
 
 export default function NewStudentOffers() {
+  const checkedUid = useRef<string | null | undefined>(undefined);
+  const requestVersion = useRef(0);
   const [eligibility, setEligibility] = useState<Eligibility | null>(null);
   const [message, setMessage] = useState("");
   const [checking, setChecking] = useState(false);
@@ -30,10 +33,10 @@ export default function NewStudentOffers() {
   const [lastFive, setLastFive] = useState("");
 
   const checkEligibility = useCallback(async () => {
+    const version = ++requestVersion.current;
     const user = auth.currentUser;
     if (!user) { setEligibility(null); return; }
     setChecking(true);
-    setEligibility(null);
     setMessage("");
     try {
       const token = await user.getIdToken(true);
@@ -41,22 +44,27 @@ export default function NewStudentOffers() {
         method: "POST", headers: { Authorization: `Bearer ${token}` },
       });
       const result = await response.json();
-      if (auth.currentUser?.uid !== user.uid) return;
+      if (auth.currentUser?.uid !== user.uid || version !== requestVersion.current) return;
       if (result.status) {
         setEligibility(result);
         setSelected(current => current.filter(id => !result.unavailableOfferIds?.includes(id)));
       }
       if (!response.ok && !result.status) throw new Error(result.error || "無法確認資格");
     } catch (error) {
+      if (version !== requestVersion.current || auth.currentUser?.uid !== user.uid) return;
       setMessage(error instanceof Error ? error.message : "無法確認資格，請稍後重試。");
-    } finally { setChecking(false); }
+      setEligibility(current => current ? { ...current, status: "pending", reason: "eligibility_unavailable" } : null);
+    } finally { if (version === requestVersion.current) setChecking(false); }
   }, []);
 
-  useEffect(() => onAuthStateChanged(auth, () => {
-    setEligibility(null);
-    setSelected([]);
-    void checkEligibility();
-  }), [checkEligibility]);
+  useEffect(() => {
+    const stop = onAuthStateChanged(auth, user => {
+      const uid = user?.uid ?? null;
+      if (uid !== checkedUid.current) { checkedUid.current = uid; requestVersion.current++; setEligibility(null); setSelected([]); setMessage(""); }
+      void checkEligibility();
+    });
+    return () => { requestVersion.current++; stop(); };
+  }, [checkEligibility]);
 
   async function purchase() {
     const user = auth.currentUser;
@@ -86,7 +94,8 @@ export default function NewStudentOffers() {
 
   const enabled = eligibility?.status === "eligible" && eligibility.purchasingEnabled;
   // Wait for the server decision so existing members never see the offer flash.
-  if (!eligibility || eligibility.status === "ineligible") return null;
+  if (!eligibility) return message ? <div role="status" className="mt-6 rounded-xl border border-amber-300 p-4 text-slate-800"><p>{message}</p><button type="button" disabled={checking} onClick={() => void checkEligibility()} className="mt-2 rounded-lg border px-3 py-2 font-semibold">重新確認資格</button></div> : null;
+  if (eligibility.status === "ineligible") return null;
 
   const total = selected.reduce((sum, id) => sum + NEW_STUDENT_OFFERS[id].price, 0);
   return (
@@ -123,10 +132,13 @@ export default function NewStudentOffers() {
             <p className="mt-3 text-sm text-slate-400 line-through">原價 NT$ {offer.regularPrice.toLocaleString()}</p>
             <p className="text-2xl font-bold text-sky-700">NT$ {offer.price.toLocaleString()}</p>
             <p className="mt-3 text-sm">{offer.points ? `${offer.points} 點` : "單堂體驗券 1 張"}</p>
-            <label className="mt-5 flex items-center gap-2">
-              <input type="checkbox" aria-label={offer.name} checked={selected.includes(id)} disabled={!enabled || checking || busy || unavailable}
-                onChange={event => setSelected(current => event.target.checked ? [...current, id] : current.filter(value => value !== id))} />
-              {unavailable ? "已申請或已購買" : "選購此優惠"}
+            <label className={`mt-5 flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-3 font-semibold ${unavailable || !enabled || checking || busy ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600" : selected.includes(id) ? "cursor-pointer border-sky-600 bg-sky-50 text-sky-900" : "cursor-pointer border-slate-300 text-slate-800"}`}>
+              <input type="checkbox" className="h-5 w-5 shrink-0 accent-sky-700" aria-label={offer.name} checked={selected.includes(id)} disabled={!enabled || checking || busy || unavailable}
+                onChange={event => {
+                  const checked = event.target.checked;
+                  setSelected(current => checked ? [...new Set([...current, id])] : current.filter(value => value !== id));
+                }} />
+              <span>{unavailable ? "已申請或已購買" : selected.includes(id) ? "已選擇此優惠" : "選購此優惠"}</span>
             </label>
           </article>;
         })}

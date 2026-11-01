@@ -211,3 +211,16 @@ test('verified registered-only legacy record can purchase before any claim witho
  assert.equal((await f.buy('trial_yoga')).status,200);assert.equal((await f.finish('trial_yoga')).status,200);
  assert.equal(f.data.get('users/student').points,0);assert.equal(f.data.get('legacyMembers/old').status,'unclaimed');assert.equal(f.data.get('legacyMembers/old').points,100);
 });
+
+test('mobile checkbox captures checked state before deferred render restores DOM',()=>{
+ const policyJs=ts.transpileModule(fs.readFileSync(path.join(root,'lib/newStudentOffers.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText;const policy={exports:{}};vm.runInNewContext(policyJs,{module:policy,exports:policy.exports});
+ let index=0;const state=[{status:'eligible',purchasingEnabled:true,unavailableOfferIds:[]},'',false,false,[],''];const updates=[];const jsx={jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})};
+ const source=ts.transpileModule(fs.readFileSync(path.join(root,'components/NewStudentOffers.tsx'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;const module={exports:{}};
+ vm.runInNewContext(source,{module,exports:module.exports,require:id=>{
+ if(id==='react')return{useRef:initial=>({current:initial}),useState:initial=>{const i=index++;if(!(i in state))state[i]=initial;return[state[i],fn=>updates.push(()=>{state[i]=typeof fn==='function'?fn(state[i]):fn})]},useEffect:()=>{},useCallback:fn=>fn};
+ if(id==='react/jsx-runtime')return jsx;if(id==='firebase/auth')return{};if(id==='@/lib/firebase')return{auth:{}};if(id==='@/lib/newStudentOffers')return policy.exports;throw Error(id);
+ }});
+ function nodes(tree){if(!tree||typeof tree!=='object')return[];if(Array.isArray(tree))return tree.flatMap(nodes);return[...(tree.type==='input'&&tree.props.type==='checkbox'?[tree]:[]),...nodes(tree.props?.children)]}
+ const render=()=>{index=0;return module.exports.default()};let tree=render();const event={target:{checked:true}};nodes(tree)[0].props.onChange(event);event.target.checked=false;updates.splice(0).forEach(fn=>fn());tree=render();assert.equal(nodes(tree)[0].props.checked,true);assert.equal(state[4].length,1);
+ const uncheck={target:{checked:false}};nodes(tree)[0].props.onChange(uncheck);uncheck.target.checked=true;updates.splice(0).forEach(fn=>fn());assert.equal(nodes(render())[0].props.checked,false);
+});
