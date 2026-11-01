@@ -157,5 +157,5 @@ test('ineligible and checking members do not see offers',()=>{
 });
 test('pending or purchased offer checkbox is disabled',()=>{
  const html=renderOffers({status:'eligible',purchasingEnabled:true,unavailableOfferIds:['trial_yoga']});
- assert.match(html,/已申請或已購買/);assert.match(html,/type="checkbox" disabled=""/);
+ assert.match(html,/已申請或已購買/);assert.match(html,/type="checkbox"[^>]* disabled=""/);
 });
