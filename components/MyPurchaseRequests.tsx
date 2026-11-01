@@ -224,7 +224,7 @@ export default function MyPurchaseRequests({
         </h2>
 
         <p className="mt-2 text-sm leading-6 text-slate-500">
-          可在此查看購買申請、付款狀態及課卡點數發放進度。
+          可在此查看購買申請、付款狀態及點數、體驗券發放進度。
         </p>
       </div>
 
@@ -248,6 +248,7 @@ export default function MyPurchaseRequests({
         <div className="mt-7 space-y-5">
           {requests.map((request) => {
             const statusInfo = getRequestStatus(request.status);
+            const isTrialVoucher = request.id.startsWith("new_student_") && (request.id.endsWith("_trial_yoga") || request.id.endsWith("_trial_aerial"));
 
             return (
               <div
@@ -273,17 +274,17 @@ export default function MyPurchaseRequests({
                 </div>
 
                 <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                  {statusInfo.description}
+                  {isTrialVoucher && request.status === "completed" ? "款項已確認，單堂體驗券已發放至會員帳戶。" : statusInfo.description}
                 </p>
 
                 <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   <div>
                     <p className="text-xs font-semibold text-slate-400">
-                      課卡點數
+                      {isTrialVoucher ? "發放權益" : "課卡點數"}
                     </p>
 
                     <p className="mt-1 font-bold text-slate-900">
-                      {request.packagePoints} 點
+                      {isTrialVoucher ? "單堂體驗券 1 張" : `${request.packagePoints} 點`}
                     </p>
                   </div>
 

@@ -15,6 +15,7 @@ import {
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import MyPurchaseRequests from "@/components/MyPurchaseRequests";
+import NewStudentOffers from "@/components/NewStudentOffers";
 
 type PackageData = {
   id: string;
@@ -121,7 +122,7 @@ const [birthdayUsedThisYear, setBirthdayUsedThisYear] = useState(true);
             const data = snapshot.data();
 
             setIsNewStudent(
-              Boolean(data.isNewStudent ?? false)
+              data.isNewStudent === true && data.newStudentEligibilityVerified === true
             );
             setBirthdayMonth(
   data.birthdayMonth !== undefined
@@ -485,6 +486,8 @@ const hasBirthdayBenefit =
             老師確認款項即會將點數加入會員帳戶。
           </p>
         </div>
+
+        <NewStudentOffers />
 
         {packages.length === 0 ? (
           <div className="mt-10 rounded-3xl bg-white px-6 py-12 text-center shadow-sm">

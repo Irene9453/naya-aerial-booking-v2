@@ -721,7 +721,10 @@ match /waitlists/{waitlistId} {
                     && request.resource.data.status
                       == "pending"
                     && request.resource.data.paymentStatus
-                      == "unpaid";
+                      == "unpaid"
+                    // 專屬方案只能由 API 建立，避免偽造訂單或覆寫限購紀錄。
+                    && request.resource.data.get("offerType", "") != "new_student"
+                    && !requestId.matches('new_student_.*');
 
       allow get, list: if isAdmin()
                        || (

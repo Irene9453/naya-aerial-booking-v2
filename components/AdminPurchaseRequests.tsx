@@ -19,6 +19,7 @@ import {
 type PurchaseRequestData = {
   id: string;
   userId: string;
+  offerType: string;
 
   studentName: string;
   studentEmail: string;
@@ -204,6 +205,7 @@ export default function AdminPurchaseRequests() {
                   return {
                     id: requestDocument.id,
                     userId,
+                    offerType: String(data.offerType ?? ""),
 
                     studentName,
                     studentEmail,
@@ -344,13 +346,7 @@ export default function AdminPurchaseRequests() {
     }
 
     const confirmed = window.confirm(
-      `確定已收到 ${
-        request.studentName
-      } 的 ${formatCurrency(
-        request.finalPrice
-      )}，並發放 ${
-        request.packagePoints
-      } 點嗎？`
+      `確定已收到 ${request.studentName} 的 ${formatCurrency(request.finalPrice)}，並${request.offerType === "new_student" ? "發放新生優惠權益" : `發放 ${request.packagePoints} 點`}嗎？`
     );
 
     if (!confirmed) {
@@ -361,15 +357,29 @@ export default function AdminPurchaseRequests() {
     setMessage("");
 
     try {
-      const result =
-        await completePurchaseRequest({
+      if (request.offerType === "new_student") {
+        const token = await admin.getIdToken();
+        const response = await fetch("/api/admin/new-student-offers/approve", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ requestId: request.id }),
+        });
+        const result: { error?: string; packageName?: string; voucherIssued?: boolean; pointsAdded?: number } =
+          await response.json();
+        if (!response.ok) throw new Error(result.error ?? "核准失敗");
+        setMessage(`購買完成！${request.studentName} 已獲得 ${result.packageName}${result.voucherIssued ? "體驗券" : `，增加 ${result.pointsAdded} 點`}。`);
+      } else {
+        const result = await completePurchaseRequest({
           requestId: request.id,
           adminId: admin.uid,
         });
-
-      setMessage(
-        `購買完成！${request.studentName} 已增加 ${result.packagePoints} 點，目前共有 ${result.newPointBalance} 點。`
-      );
+        setMessage(
+          `購買完成！${request.studentName} 已增加 ${result.packagePoints} 點，目前共有 ${result.newPointBalance} 點。`
+        );
+      }
     } catch (error: unknown) {
       console.error(error);
 
@@ -441,7 +451,7 @@ export default function AdminPurchaseRequests() {
             </h2>
 
             <p className="mt-2 text-sm text-slate-500">
-              確認款項後，系統會自動加入課卡點數。
+              確認款項後，系統會發放課卡點數或新生體驗券。
             </p>
           </div>
 
@@ -613,7 +623,7 @@ export default function AdminPurchaseRequests() {
                     </p>
 
                     <p className="mt-1 font-bold text-slate-900">
-                      {request.packagePoints} 點
+                      {request.offerType === "new_student" && request.packagePoints === 0 ? "單堂體驗券 × 1" : `${request.packagePoints} 點`}
                     </p>
                   </div>
 
@@ -728,7 +738,7 @@ export default function AdminPurchaseRequests() {
                       : isBirthdayOrder &&
                           !isBirthdayMonth
                         ? "生日資格不符"
-                        : "確認收款並加點"}
+                        : request.offerType === "new_student" ? "確認收款並發放權益" : "確認收款並加點"}
                   </button>
                 </div>
               </div>

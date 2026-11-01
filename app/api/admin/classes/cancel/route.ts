@@ -119,6 +119,8 @@ export async function POST(request: NextRequest) {
         notificationRef: FirebaseFirestore.DocumentReference;
         pointsUsed: number;
         newBalance: number;
+        paymentType: "points" | "trial_voucher";
+        voucherRef: FirebaseFirestore.DocumentReference | null;
         userId: string;
         bookingId: string;
       }> = [];
@@ -152,11 +154,20 @@ export async function POST(request: NextRequest) {
         }
         seenUserIds.add(userId);
 
+        const paymentType = bookingData.paymentType === "trial_voucher"
+          ? "trial_voucher" as const
+          : bookingData.paymentType == null || bookingData.paymentType === "points"
+            ? "points" as const
+            : null;
+        if (!paymentType) {
+          throw new CancelError("INVALID_PAYMENT_TYPE", `預約 ${bookingId} 的使用權益不正確。`);
+        }
         const pointsUsed = bookingData.pointsUsed;
         if (
           typeof pointsUsed !== "number" ||
           !Number.isSafeInteger(pointsUsed) ||
-          pointsUsed <= 0
+          (paymentType === "points" && pointsUsed <= 0) ||
+          (paymentType === "trial_voucher" && pointsUsed !== 0)
         ) {
           throw new CancelError(
             "INVALID_POINTS",
@@ -170,10 +181,25 @@ export async function POST(request: NextRequest) {
         const notificationRef = adminDb.collection("notifications")
           .doc(`${bookingId}_whole_class_cancel_notification`);
 
-        const [userSnapshot, refundSnapshot] = await Promise.all([
+        const voucherId = bookingData.trialVoucherId;
+        if (paymentType === "trial_voucher" &&
+            (typeof voucherId !== "string" || !voucherId || voucherId.includes("/"))) {
+          throw new CancelError("INVALID_VOUCHER", `預約 ${bookingId} 缺少有效體驗券資料。`);
+        }
+        const voucherRef = paymentType === "trial_voucher"
+          ? adminDb.collection("trialVouchers").doc(voucherId as string)
+          : null;
+        const [userSnapshot, refundSnapshot, voucherSnapshot] = await Promise.all([
           tx.get(userRef),
           tx.get(refundRef),
+          voucherRef ? tx.get(voucherRef) : Promise.resolve(null),
         ]);
+        if (voucherRef && (!voucherSnapshot?.exists ||
+            voucherSnapshot.data()?.userId !== userId ||
+            voucherSnapshot.data()?.status !== "used" ||
+            voucherSnapshot.data()?.bookingId !== bookingId)) {
+          throw new CancelError("VOUCHER_MISMATCH", `預約 ${bookingId} 的體驗券狀態不一致，已停止退款。`);
+        }
 
         if (!userSnapshot.exists) {
           throw new CancelError(
@@ -203,7 +229,7 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const newBalance = currentPoints + pointsUsed;
+        const newBalance = currentPoints + (paymentType === "points" ? pointsUsed : 0);
 
         if (!Number.isSafeInteger(newBalance)) {
           throw new CancelError(
@@ -221,6 +247,8 @@ export async function POST(request: NextRequest) {
           notificationRef,
           pointsUsed,
           newBalance,
+          paymentType,
+          voucherRef,
           userId,
           bookingId,
         });
@@ -261,14 +289,23 @@ export async function POST(request: NextRequest) {
           entry.bookingData.courseName ?? classData.courseName ?? ""
         );
 
-        tx.update(entry.userRef, {
-          points: entry.newBalance,
-        });
+        if (entry.paymentType === "points") {
+          tx.update(entry.userRef, { points: entry.newBalance });
+        } else if (entry.voucherRef) {
+          tx.update(entry.voucherRef, {
+            status: "available",
+            quantity: 1,
+            bookingId: null,
+            usedAt: null,
+            refundedAt: FieldValue.serverTimestamp(),
+          });
+        }
 
         tx.update(entry.bookingRef, {
           status: "admin_cancelled",
           cancelledAt: FieldValue.serverTimestamp(),
-          pointsRefunded: entry.pointsUsed,
+          pointsRefunded: entry.paymentType === "points" ? entry.pointsUsed : 0,
+          trialVoucherRefunded: entry.paymentType === "trial_voucher",
           cancelledBy: adminUid,
           cancellationSource: "admin",
           cancellationMode: "whole_class",
@@ -282,8 +319,12 @@ export async function POST(request: NextRequest) {
           classId,
           courseName,
           classStartTime: startTime,
-          type: "admin_whole_class_cancellation_refund",
-          amount: entry.pointsUsed,
+          type: entry.paymentType === "trial_voucher"
+            ? "admin_whole_class_trial_voucher_refund"
+            : "admin_whole_class_cancellation_refund",
+          paymentType: entry.paymentType,
+          trialVoucherId: entry.voucherRef?.id ?? null,
+          amount: entry.paymentType === "points" ? entry.pointsUsed : 0,
           balanceAfter: entry.newBalance,
           adminUid,
           cancelMode: "whole_class",
@@ -296,7 +337,9 @@ export async function POST(request: NextRequest) {
           classId,
           type: "admin_whole_class_cancellation",
           title: "課程已取消",
-          body: `${courseName || "你預約的課程"} 已由老師整堂取消，已退還 ${entry.pointsUsed} 點。`,
+          body: entry.paymentType === "trial_voucher"
+            ? `${courseName || "你預約的課程"} 已由老師整堂取消，已退還原體驗券。`
+            : `${courseName || "你預約的課程"} 已由老師整堂取消，已退還 ${entry.pointsUsed} 點。`,
           courseName,
           classStartTime: startTime,
           isRead: false,
@@ -322,7 +365,7 @@ export async function POST(request: NextRequest) {
         cancellationMode: "whole_class",
         cancellationRefundCount: entries.length,
         cancellationRefundPoints: entries.reduce(
-          (sum, entry) => sum + entry.pointsUsed,
+          (sum, entry) => sum + (entry.paymentType === "points" ? entry.pointsUsed : 0),
           0
         ),
       });
@@ -331,9 +374,10 @@ export async function POST(request: NextRequest) {
         classId,
         cancelledBookings: entries.length,
         refundedPoints: entries.reduce(
-          (sum, entry) => sum + entry.pointsUsed,
+          (sum, entry) => sum + (entry.paymentType === "points" ? entry.pointsUsed : 0),
           0
         ),
+        refundedTrialVouchers: entries.filter((entry) => entry.paymentType === "trial_voucher").length,
       };
     });
 

@@ -233,6 +233,19 @@ export async function POST(request: NextRequest) {
         const lessonSnapshot =
           await transaction.get(lessonRecordRef);
 
+        // NAYA_ADMIN_TRIAL_REFUND_V1: 讀券須在任何交易寫入之前完成。
+        const isTrialVoucher = bookingData.paymentType === "trial_voucher";
+        const trialVoucherId = bookingData.trialVoucherId;
+        if (isTrialVoucher &&
+            (typeof trialVoucherId !== "string" || !trialVoucherId || trialVoucherId.includes("/"))) {
+          throw new CancelError("INVALID_VOUCHER", "體驗券預約資料不正確。");
+        }
+        const voucherRef = isTrialVoucher
+          ? adminDb.collection("trialVouchers").doc(trialVoucherId)
+          : null;
+        const voucherSnapshot = voucherRef
+          ? await transaction.get(voucherRef) : null;
+
         if (!userSnapshot.exists) {
           throw new CancelError(
             "USER_NOT_FOUND",
@@ -306,7 +319,7 @@ export async function POST(request: NextRequest) {
 
         if (
           !Number.isSafeInteger(pointsUsed) ||
-          pointsUsed <= 0 ||
+          (isTrialVoucher ? pointsUsed !== 0 : pointsUsed <= 0) ||
           !Number.isSafeInteger(currentPoints) ||
           currentPoints < 0 ||
           !Number.isSafeInteger(bookedCount) ||
@@ -390,8 +403,20 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const newPointBalance =
-          currentPoints + pointsUsed;
+        // 課後未出席：已消耗的體驗券不退還；課前及補償取消才退券。
+        const refundTrialVoucher = isTrialVoucher && cancelMode !== "after_absent";
+        if (isTrialVoucher && (
+          !voucherSnapshot?.exists ||
+          voucherSnapshot.data()?.userId !== userId ||
+          voucherSnapshot.data()?.bookingId !== bookingId ||
+          voucherSnapshot.data()?.status !== "used" ||
+          voucherSnapshot.data()?.quantity !== 0 ||
+          trialVoucherId !== `new_student_${userId}_${bookingData.trialOfferId}`
+        )) {
+          throw new CancelError("VOUCHER_MISMATCH", "體驗券狀態異常，已停止取消以避免錯誤退券。");
+        }
+        const refundedPoints = isTrialVoucher ? 0 : pointsUsed;
+        const newPointBalance = currentPoints + refundedPoints;
 
         const newBookedCount = bookedCount - 1;
 
@@ -409,15 +434,19 @@ export async function POST(request: NextRequest) {
         );
 
         // 以下開始寫入
-        transaction.update(userRef, {
-          points: newPointBalance,
-          ...(shouldReverseReward
-            ? {
-                rewardPoints:
-                  currentRewardPoints - grantedPoints,
-              }
-            : {}),
-        });
+        if (!isTrialVoucher || shouldReverseReward) {
+          transaction.update(userRef, {
+            ...(!isTrialVoucher ? { points: newPointBalance } : {}),
+            ...(shouldReverseReward
+              ? { rewardPoints: currentRewardPoints - grantedPoints } : {}),
+          });
+        }
+        if (refundTrialVoucher && voucherRef) {
+          transaction.update(voucherRef, {
+            status: "available", quantity: 1, bookingId: null,
+            usedAt: null, refundedAt: FieldValue.serverTimestamp(),
+          });
+        }
 
         transaction.update(classRef, {
           bookedCount: newBookedCount,
@@ -426,7 +455,8 @@ export async function POST(request: NextRequest) {
         transaction.update(bookingRef, {
           status: "admin_cancelled",
           cancelledAt: FieldValue.serverTimestamp(),
-          pointsRefunded: pointsUsed,
+          pointsRefunded: refundedPoints,
+          trialVoucherRefunded: refundTrialVoucher,
           cancelledBy: adminUid,
           cancellationSource: "admin",
           cancellationMode: cancelMode,
@@ -452,8 +482,11 @@ export async function POST(request: NextRequest) {
           classId,
           courseName,
           classStartTime,
-          type: "admin_cancellation_refund",
-          amount: pointsUsed,
+          type: isTrialVoucher
+            ? (refundTrialVoucher ? "admin_trial_voucher_refund" : "admin_trial_voucher_forfeited")
+            : "admin_cancellation_refund",
+          trialVoucherId: isTrialVoucher ? trialVoucherId : null,
+          amount: refundedPoints,
           balanceAfter: newPointBalance,
           adminUid,
           cancelMode,
@@ -489,10 +522,13 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        const notificationBody =
-          cancelMode === "after_compensation"
-            ? `老師已為你辦理 ${courseName} 的補償退點，退回 ${pointsUsed} 點。出席紅利與上課紀錄保留。`
-            : `老師已替你取消 ${courseName}，並退回 ${pointsUsed} 點。`;
+        const notificationBody = isTrialVoucher
+          ? (refundTrialVoucher
+              ? `老師已替你取消 ${courseName}，原體驗券已退回。`
+              : `老師已替你登記 ${courseName} 未出席，體驗券不退還。`)
+          : (cancelMode === "after_compensation"
+              ? `老師已為你辦理 ${courseName} 的補償退點，退回 ${pointsUsed} 點。出席紅利與上課紀錄保留。`
+              : `老師已替你取消 ${courseName}，並退回 ${pointsUsed} 點。`);
 
         transaction.set(notificationRef, {
           userId,
@@ -511,7 +547,8 @@ export async function POST(request: NextRequest) {
         });
 
         return {
-          refundedPoints: pointsUsed,
+          refundedPoints,
+          trialVoucherRefunded: refundTrialVoucher,
           newPointBalance,
           newBookedCount,
           cancelMode,
@@ -658,6 +695,7 @@ for (const waitlistDoc of chunk) {
     return NextResponse.json({
       success: true,
       refundedPoints: result.refundedPoints,
+      trialVoucherRefunded: result.trialVoucherRefunded,
       newPointBalance: result.newPointBalance,
       newBookedCount: result.newBookedCount,
       cancelMode: result.cancelMode,

@@ -3,11 +3,13 @@ import { auth } from "@/lib/firebase";
 type BookClassParams = {
   userId: string;
   classId: string;
+  trialVoucherId?: string | null;
 };
 
 export async function bookClass({
   userId,
   classId,
+  trialVoucherId,
 }: BookClassParams) {
   const currentUser = auth.currentUser;
 
@@ -29,6 +31,7 @@ export async function bookClass({
     },
     body: JSON.stringify({
       classId,
+      ...(trialVoucherId ? { trialVoucherId } : {}),
     }),
   });
 

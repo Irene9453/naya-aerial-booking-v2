@@ -70,7 +70,9 @@ service cloud.firestore {
   allow create: if isOwner(userId)
                 && request.resource.data.role == "student"
                 && request.resource.data.points == 0
-                && request.resource.data.rewardPoints == 0;
+                && request.resource.data.rewardPoints == 0
+                && request.resource.data.isNewStudent == false
+                && request.resource.data.newStudentEligibilityVerified == false;
 
   // 會員只能讀取自己的資料，管理員可讀取所有會員
   allow read: if isOwner(userId) || isAdmin();
@@ -554,7 +556,10 @@ match /legacyClaimRequests/{requestId} {
                     && request.resource.data.status
                       == "pending"
                     && request.resource.data.paymentStatus
-                      == "unpaid";
+                      == "unpaid"
+                    // 專屬方案只能由 API 建立，避免偽造訂單或覆寫限購紀錄。
+                    && request.resource.data.get("offerType", "") != "new_student"
+                    && !requestId.matches('new_student_.*');
 
       allow get, list: if isAdmin()
                        || (
@@ -666,6 +671,14 @@ match /legacyClaimRequests/{requestId} {
 
       // 禁止刪除
       allow delete: if false;
+    }
+
+
+    match /trialVouchers/{voucherId} {
+      allow get, list: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+
+      allow create, update, delete: if false;
     }
 
   }

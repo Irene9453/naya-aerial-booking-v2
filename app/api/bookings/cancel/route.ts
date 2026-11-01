@@ -96,11 +96,19 @@ export async function POST(request: NextRequest) {
       .collection("bookings")
       .doc(bookingId);
 
+    // NAYA_TRIAL_REFUND_V1: voucher refund shares the same transaction as cancellation.
     const result = await adminDb.runTransaction(
       async (tx) => {
         const userSnap = await tx.get(userRef);
         const classSnap = await tx.get(classRef);
         const bookingSnap = await tx.get(bookingRef);
+        const isTrialVoucher = bookingSnap.data()?.paymentType === "trial_voucher";
+        const trialVoucherId = bookingSnap.data()?.trialVoucherId;
+        if (isTrialVoucher && (typeof trialVoucherId !== "string" || trialVoucherId.includes("/") || !trialVoucherId)) {
+          throw new Error("體驗券預約資料不正確");
+        }
+        const voucherRef = isTrialVoucher ? adminDb.collection("trialVouchers").doc(trialVoucherId) : null;
+        const voucherSnap = voucherRef ? await tx.get(voucherRef) : null;
 
         if (!userSnap.exists) {
           throw new Error("找不到會員資料");
@@ -155,9 +163,9 @@ export async function POST(request: NextRequest) {
         );
 
         if (
-          !Number.isFinite(pointsUsed) ||
-          pointsUsed <= 0 ||
-          !Number.isFinite(currentPoints)
+          !Number.isSafeInteger(pointsUsed) ||
+          (isTrialVoucher ? pointsUsed !== 0 : pointsUsed <= 0) ||
+          !Number.isSafeInteger(currentPoints) || currentPoints < 0
         ) {
           throw new Error("預約點數資料不正確");
         }
@@ -169,8 +177,14 @@ export async function POST(request: NextRequest) {
           throw new Error("課程預約人數資料異常");
         }
 
-        const newPointBalance =
-          currentPoints + pointsUsed;
+        if (isTrialVoucher && (
+          !voucherSnap?.exists || voucherSnap.data()?.userId !== userId ||
+          voucherSnap.data()?.bookingId !== bookingId ||
+          voucherSnap.data()?.status !== "used" || voucherSnap.data()?.quantity !== 0 ||
+          trialVoucherId !== `new_student_${userId}_${bookingData.trialOfferId}`
+        )) throw new Error("體驗券狀態不正確，無法退還");
+
+        const newPointBalance = currentPoints + pointsUsed;
 
         const newBookedCount = bookedCount - 1;
 
@@ -182,9 +196,11 @@ export async function POST(request: NextRequest) {
           .collection("notifications")
           .doc();
 
-        tx.update(userRef, {
-          points: newPointBalance,
-        });
+        if (voucherRef) {
+          tx.update(voucherRef, { status: "available", quantity: 1, bookingId: null, usedAt: null, refundedAt: FieldValue.serverTimestamp() });
+        } else {
+          tx.update(userRef, { points: newPointBalance });
+        }
 
         tx.update(classRef, {
           bookedCount: newBookedCount,
@@ -194,6 +210,7 @@ export async function POST(request: NextRequest) {
           status: "cancelled",
           cancelledAt: FieldValue.serverTimestamp(),
           pointsRefunded: pointsUsed,
+          trialVoucherRefunded: isTrialVoucher,
         });
 
         tx.create(refundRef, {
@@ -204,7 +221,8 @@ export async function POST(request: NextRequest) {
             bookingData.courseName ?? ""
           ),
           classStartTime: classData.startTime,
-          type: "cancellation_refund",
+          type: isTrialVoucher ? "trial_voucher_cancellation_refund" : "cancellation_refund",
+          trialVoucherId: isTrialVoucher ? trialVoucherId : null,
           amount: pointsUsed,
           balanceAfter: newPointBalance,
           createdAt: FieldValue.serverTimestamp(),
@@ -216,7 +234,7 @@ export async function POST(request: NextRequest) {
           title: "預約已取消",
           body: `已取消 ${String(
             bookingData.courseName ?? ""
-          )}，並退回 ${pointsUsed} 點`,
+          )}，${isTrialVoucher ? "體驗券已退回" : `並退回 ${pointsUsed} 點`}`,
           classId,
           bookingId,
           courseName: String(
@@ -229,6 +247,7 @@ export async function POST(request: NextRequest) {
 
         return {
           refundedPoints: pointsUsed,
+          trialVoucherRefunded: isTrialVoucher,
           newPointBalance,
           cancellationDeadline:
             cancellationDeadline.toISOString(),
@@ -352,6 +371,8 @@ for (const waitlistDoc of waitingDocs.slice(i, i + 200)) {
       "無法計算取消期限",
       "已超過取消期限。課程最晚須於上課前一天 23:59 前取消。",
       "預約點數資料不正確",
+      "體驗券預約資料不正確",
+      "體驗券狀態不正確，無法退還",
       "課程預約人數資料異常",
     ];
 

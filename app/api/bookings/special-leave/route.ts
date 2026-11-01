@@ -143,11 +143,19 @@ export async function POST(request: NextRequest) {
       .collection("notifications")
       .doc(`${bookingId}_special_leave`);
 
+    // NAYA_TRIAL_REFUND_V1: voucher refund shares the same transaction as cancellation.
     const result = await adminDb.runTransaction(
       async (tx) => {
         // Firestore transaction：先完成所有讀取
         const userSnap = await tx.get(userRef);
         const bookingSnap = await tx.get(bookingRef);
+        const isTrialVoucher = bookingSnap.data()?.paymentType === "trial_voucher";
+        const trialVoucherId = bookingSnap.data()?.trialVoucherId;
+        if (isTrialVoucher && (typeof trialVoucherId !== "string" || trialVoucherId.includes("/") || !trialVoucherId)) {
+          throw new Error("體驗券預約資料不正確");
+        }
+        const voucherRef = isTrialVoucher ? adminDb.collection("trialVouchers").doc(trialVoucherId) : null;
+        const voucherSnap = voucherRef ? await tx.get(voucherRef) : null;
         const classSnap = await tx.get(classRef);
         const specialLeaveSnap = await tx.get(
           specialLeaveRef
@@ -254,15 +262,21 @@ export async function POST(request: NextRequest) {
 
         if (
           !Number.isFinite(pointsUsed) ||
-          pointsUsed <= 0 ||
+          (isTrialVoucher ? pointsUsed !== 0 : pointsUsed <= 0) ||
           !Number.isFinite(currentPoints) ||
           currentPoints < 0
         ) {
           throw new Error("預約點數資料不正確");
         }
 
-        const newPointBalance =
-          currentPoints + pointsUsed;
+        if (isTrialVoucher && (
+          !voucherSnap?.exists || voucherSnap.data()?.userId !== userId ||
+          voucherSnap.data()?.bookingId !== bookingId ||
+          voucherSnap.data()?.status !== "used" || voucherSnap.data()?.quantity !== 0 ||
+          trialVoucherId !== `new_student_${userId}_${bookingData.trialOfferId}`
+        )) throw new Error("體驗券狀態不正確，無法退還");
+
+        const newPointBalance = currentPoints + pointsUsed;
 
         const newBookedCount = bookedCount - 1;
 
@@ -277,9 +291,11 @@ export async function POST(request: NextRequest) {
         );
 
         // 退還點數
-        tx.update(userRef, {
-          points: newPointBalance,
-        });
+        if (voucherRef) {
+          tx.update(voucherRef, { status: "available", quantity: 1, bookingId: null, usedAt: null, refundedAt: FieldValue.serverTimestamp() });
+        } else {
+          tx.update(userRef, { points: newPointBalance });
+        }
 
         // 釋出課程名額
         tx.update(classRef, {
@@ -292,6 +308,7 @@ export async function POST(request: NextRequest) {
           specialLeaveAt:
             FieldValue.serverTimestamp(),
           pointsRefunded: pointsUsed,
+          trialVoucherRefunded: isTrialVoucher,
         });
 
         // 半年一次的特殊請假紀錄
@@ -321,7 +338,8 @@ export async function POST(request: NextRequest) {
           classId,
           courseName,
           classStartTime,
-          type: "special_leave_refund",
+          type: isTrialVoucher ? "trial_voucher_special_leave_refund" : "special_leave_refund",
+          trialVoucherId: isTrialVoucher ? trialVoucherId : null,
           amount: pointsUsed,
           balanceAfter: newPointBalance,
           createdAt: FieldValue.serverTimestamp(),
@@ -334,13 +352,14 @@ export async function POST(request: NextRequest) {
           classId,
           type: "special_leave",
           title: "特殊請假成功",
-          body: `已完成 ${courseName} 的特殊請假，並退回 ${pointsUsed} 點。`,
+          body: `已完成 ${courseName} 的特殊請假，${isTrialVoucher ? "體驗券已退回" : `並退回 ${pointsUsed} 點`}。`,
           isRead: false,
           createdAt: FieldValue.serverTimestamp(),
         });
 
         return {
           refundedPoints: pointsUsed,
+          trialVoucherRefunded: isTrialVoucher,
           newPointBalance,
           periodYear,
           periodHalf,
@@ -410,6 +429,8 @@ export async function POST(request: NextRequest) {
       "課程預約人數資料異常",
       "此堂課目前預約人數為 3 人以下，無法使用特殊請假。",
       "預約點數資料不正確",
+      "體驗券預約資料不正確",
+      "體驗券狀態不正確，無法退還",
     ];
 
     const isQuotaError =

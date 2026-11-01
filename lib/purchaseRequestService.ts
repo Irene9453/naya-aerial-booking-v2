@@ -222,7 +222,7 @@ const userData = userSnapshot.data();
         }
         verifiedDiscountRate = 0.7;
       } else if (couponSource === "new_student") {
-        if (userData.isNewStudent !== true) {
+        if (userData.isNewStudent !== true || userData.newStudentEligibilityVerified !== true) {
           throw new Error("此會員不符合新生優惠資格");
         }
 
@@ -324,27 +324,13 @@ const userData = userSnapshot.data();
       // 8. 更新學生點數
       // =========================
 
-      const userUpdates: {
-  points: number;
-  isNewStudent?: boolean;
-} = {
-  points: newPointBalance,
-};
-
-      /*
-       * 只有真的使用新生優惠，
-       * 才取消新生資格。
-       *
-       * 如果學生這次選擇「不使用優惠」，
-       * 仍保留新生優惠資格。
-       */
-      if (
-        couponSource ===
-        "new_student"
-      ) {
-        userUpdates.isNewStudent =
-          false;
-      }
+      // 一般課卡只在首次購買時享有新生折扣。
+      // 不論這筆首次購買是否選用優惠，完成後均結束新生資格。
+      // 新生專屬方案由另一支核准 API 管理，不會經過這裡。
+      const userUpdates = {
+        points: newPointBalance,
+        isNewStudent: false,
+      };
 
       if (birthdayUseRef) {
   transaction.set(birthdayUseRef, {

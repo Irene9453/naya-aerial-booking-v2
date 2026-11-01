@@ -16,6 +16,7 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { bookClass } from "@/lib/bookingService";
+import TrialVoucherChoice from "@/components/TrialVoucherChoice";
 import {
   cancelWaitlist,
   joinWaitlist,
@@ -114,6 +115,7 @@ const [
 ] = useState(false);
   const [bookingMode, setBookingMode] =
     useState<BookingMode>("single");
+  const [selectedTrialVoucherId, setSelectedTrialVoucherId] = useState<string | null>(null);
 
   const [relatedClasses, setRelatedClasses] =
     useState<RelatedClass[]>([]);
@@ -511,6 +513,7 @@ setRelatedClasses(finalClasses);
 // 預設只選目前這一堂
 setSelectedClassIds([classId]);
 setBookingMode("single");
+setSelectedTrialVoucherId(null);
 
 // 開啟預約確認視窗前，先檢查 Email 驗證
 const currentUser = auth.currentUser;
@@ -548,6 +551,7 @@ setShowConfirmation(true);
     mode: BookingMode
   ) {
     setBookingMode(mode);
+    if (mode === "monthly") setSelectedTrialVoucherId(null);
 
     if (mode === "single") {
       setSelectedClassIds([classId]);
@@ -615,9 +619,9 @@ setShowConfirmation(true);
     currentPoints -
     totalPointsRequired;
 
+  const usingTrialVoucher = bookingMode === "single" && selectedTrialVoucherId !== null;
   const hasEnoughPoints =
-    currentPoints >=
-    totalPointsRequired;
+    usingTrialVoucher || currentPoints >= totalPointsRequired;
 
   async function handleConfirmBooking() {
   const user = auth.currentUser;
@@ -678,6 +682,7 @@ setShowConfirmation(true);
           const result = await bookClass({
             userId: user.uid,
             classId: targetClassId,
+            trialVoucherId: bookingMode === "single" ? selectedTrialVoucherId : null,
           });
 
           latestPoints =
@@ -697,6 +702,7 @@ setShowConfirmation(true);
       }
 
       setCurrentPoints(latestPoints);
+      const wasTrialBooking = bookingMode === "single" && selectedTrialVoucherId !== null;
 
 if (successCount > 0) {
   setShowConfirmation(false);
@@ -710,7 +716,7 @@ if (successCount > 0) {
 
         setMessage(
           successCount === 1
-            ? `預約成功！目前剩餘 ${latestPoints} 點。`
+            ? (wasTrialBooking ? `已使用體驗券預約成功！一般點數仍有 ${latestPoints} 點。` : `預約成功！目前剩餘 ${latestPoints} 點。`)
             : `成功預約 ${successCount} 堂課！目前剩餘 ${latestPoints} 點。`
         );
       } else if (
@@ -938,6 +944,16 @@ if (alreadyBooked) {
               </div>
             )}
 
+            {bookingMode === "single" && auth.currentUser && (
+              <TrialVoucherChoice
+                userId={auth.currentUser.uid}
+                courseName={courseName}
+                value={selectedTrialVoucherId}
+                onChange={setSelectedTrialVoucherId}
+                disabled={isBooking}
+              />
+            )}
+
             {/* 整月課程選擇 */}
             {bookingMode === "monthly" &&
               relatedClasses.length > 0 && (
@@ -1024,7 +1040,7 @@ if (alreadyBooked) {
                 </span>
 
                 <span className="font-semibold text-orange-600">
-                  −{totalPointsRequired} 點
+                  {usingTrialVoucher ? "1 張體驗券（0 點）" : `−${totalPointsRequired} 點`}
                 </span>
               </div>
 
@@ -1035,7 +1051,9 @@ if (alreadyBooked) {
                   </span>
 
                   <span className="font-bold text-sky-700">
-                    {hasEnoughPoints
+                    {usingTrialVoucher
+                      ? currentPoints
+                      : hasEnoughPoints
                       ? remainingPoints
                       : currentPoints}{" "}
                     點

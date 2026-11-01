@@ -136,7 +136,8 @@ export default function RegisterPage() {
           email: email.trim().toLowerCase(),
           points: 0,
           rewardPoints: 0,
-          isNewStudent: memberType === "new",
+          isNewStudent: false, // 僅管理員核對舊會員後可開啟
+          newStudentEligibilityVerified: false,
           birthdayMonth: birth.birthdayMonth,
           birthdayDay: birth.birthdayDay,
           role: "student",
