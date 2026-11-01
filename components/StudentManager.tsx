@@ -1237,7 +1237,7 @@ phone:
                           <p>
                             折扣：{
                               typeof coupon.discountRate === "number"
-                                ? `${Math.round(coupon.discountRate * 10)} 折`
+                                ? `${Number((coupon.discountRate * 10).toFixed(2))} 折`
                                 : "未提供"
                             }
                           </p>

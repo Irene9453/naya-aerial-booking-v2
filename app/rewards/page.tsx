@@ -188,7 +188,7 @@ export default function RewardsPage() {
 
   const nextCoupon = useMemo(() => {
     return coupons.find(
-      (coupon) => coupon.rewardCost > rewardPoints
+      (coupon) => coupon.rewardCost > rewardPoints && templateCanIssue(coupon)
     );
   }, [coupons, rewardPoints]);
 

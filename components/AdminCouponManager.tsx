@@ -255,7 +255,7 @@ export default function AdminCouponManager() {
               {editing ? "編輯優惠券" : "新增優惠券"}
             </h3>
             <p className="mt-2 text-sm text-slate-500">
-              例如輸入 85，代表會員支付原價的 85%（85 折）。
+              例如輸入 85，代表會員支付原價的 85%（8.5 折）。
             </p>
 
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
