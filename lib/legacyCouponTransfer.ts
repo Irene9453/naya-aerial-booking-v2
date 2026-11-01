@@ -7,9 +7,13 @@ import {
 
 import { couponTemplateFields } from "@/lib/couponTemplate";
 
+import { expiryDateMillis, legacyCouponValidity } from "@/lib/couponValidity";
+
 export type LegacyCoupon = {
   couponId: string;
   quantity: number;
+  expiresOn?: string | null;
+  expiresOnByIndex?: Array<string | null>;
 };
 
 export function parseLegacyCoupons(value: unknown): LegacyCoupon[] {
@@ -41,11 +45,18 @@ export function parseLegacyCoupons(value: unknown): LegacyCoupon[] {
       throw new Error("INVALID_LEGACY_COUPONS");
     }
 
+    if (row.expiresOn !== undefined && row.expiresOn !== null) expiryDateMillis(row.expiresOn);
+    if (row.expiresOnByIndex !== undefined) {
+      if (!Array.isArray(row.expiresOnByIndex) || row.expiresOnByIndex.length !== quantity) throw Error("INVALID_LEGACY_COUPONS");
+      for (const date of row.expiresOnByIndex) if (date !== null && date !== "") expiryDateMillis(date);
+    }
     seen.add(couponId);
 
     return {
       couponId,
       quantity: quantity as number,
+      ...(row.expiresOn !== undefined ? { expiresOn: row.expiresOn as string | null } : {}),
+      ...(row.expiresOnByIndex !== undefined ? { expiresOnByIndex: row.expiresOnByIndex as Array<string | null> } : {}),
     };
   });
 
@@ -109,6 +120,7 @@ export async function prepareLegacyCouponTransfer(
           userId: uid,
           couponId: coupon.couponId,
           ...fields,
+          ...legacyCouponValidity(coupon, index),
           status: "available",
           rewardCost: 0,
           source: "legacy_claim",

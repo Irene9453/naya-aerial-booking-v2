@@ -16,6 +16,7 @@ type PackageSaleData = {
   price: number;
   status: string;
   createdAt: Timestamp | null;
+  paymentReceivedAtMillis: number | null;
 };
 
 function getTaipeiDateParts(date: Date) {
@@ -42,6 +43,7 @@ function formatCurrency(amount: number) {
 }
 
 export default function AdminRevenueSummary() {
+  const [summaryMonth, setSummaryMonth] = useState(() => { const parts = getTaipeiDateParts(new Date()); return `${parts.year}-${parts.month}`; });
   const [sales, setSales] = useState<PackageSaleData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -61,6 +63,7 @@ export default function AdminRevenueSummary() {
             points: Number(data.points ?? 0),
             price: Number(data.price ?? 0),
             status: String(data.status ?? ""),
+            paymentReceivedAtMillis: typeof data.paymentReceivedAtMillis === "number" && Number.isFinite(data.paymentReceivedAtMillis) ? data.paymentReceivedAtMillis : null,
             createdAt:
               data.createdAt instanceof Timestamp
                 ? data.createdAt
@@ -83,6 +86,7 @@ export default function AdminRevenueSummary() {
 
   const summary = useMemo(() => {
     const nowParts = getTaipeiDateParts(new Date());
+    const [selectedYear, selectedMonth] = summaryMonth.split("-");
 
     const completedSales = sales.filter(
       (sale) => sale.status === "completed"
@@ -96,21 +100,20 @@ export default function AdminRevenueSummary() {
     completedSales.forEach((sale) => {
       totalRevenue += sale.price;
 
-      if (!sale.createdAt) {
+      if (!sale.createdAt && sale.paymentReceivedAtMillis === null) {
         return;
       }
 
       const saleParts = getTaipeiDateParts(
-        sale.createdAt.toDate()
+        sale.paymentReceivedAtMillis !== null ? new Date(sale.paymentReceivedAtMillis) : sale.createdAt!.toDate()
       );
 
       const isThisMonth =
-        saleParts.year === nowParts.year &&
-        saleParts.month === nowParts.month;
+        saleParts.year === selectedYear &&
+        saleParts.month === selectedMonth;
 
       const isToday =
-        isThisMonth &&
-        saleParts.day === nowParts.day;
+        saleParts.year === nowParts.year && saleParts.month === nowParts.month && saleParts.day === nowParts.day;
 
       if (isThisMonth) {
         monthRevenue += sale.price;
@@ -128,7 +131,7 @@ export default function AdminRevenueSummary() {
       totalRevenue,
       monthSalesCount,
     };
-  }, [sales]);
+  }, [sales, summaryMonth]);
 
   if (isLoading) {
     return (
@@ -152,10 +155,11 @@ export default function AdminRevenueSummary() {
         </h2>
 
         <p className="mt-2 text-sm text-slate-500">
-          統計已完成的課卡販售紀錄。
+          統計已完成的課卡販售紀錄，依實際入帳日歸屬月份；舊紀錄若未登錄入帳日，沿用原確認日。
         </p>
       </div>
 
+      <label className="mt-4 block text-sm font-semibold text-slate-700">統計月份<input type="month" value={summaryMonth} onChange={event => { if (event.target.value) setSummaryMonth(event.target.value); }} className="ml-3 rounded-xl border border-slate-300 p-3 text-slate-900" /></label>
       {message && (
         <p className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">
           {message}
@@ -175,7 +179,7 @@ export default function AdminRevenueSummary() {
 
         <div className="rounded-2xl bg-slate-50 p-5">
           <p className="text-sm font-semibold text-slate-600">
-            本月收入
+            選定月份收入
           </p>
 
           <p className="mt-3 text-3xl font-bold text-slate-900">

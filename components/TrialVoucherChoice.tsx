@@ -9,6 +9,7 @@ export type TrialVoucherOption = { id: string; kind: "yoga" | "aerial" };
 type Props = {
   userId: string;
   courseName: string;
+  courseCategory?: string;
   value: string | null;
   onChange: (voucherId: string | null) => void;
   disabled?: boolean;
@@ -22,11 +23,11 @@ function eligibleKind(courseName: string): "yoga" | "aerial" | null {
   return null;
 }
 
-export default function TrialVoucherChoice({ userId, courseName, value, onChange, disabled = false }: Props) {
+export default function TrialVoucherChoice({ userId, courseName, courseCategory, value, onChange, disabled = false }: Props) {
   const [vouchers, setVouchers] = useState<TrialVoucherOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const kind = eligibleKind(courseName);
+  const kind = courseCategory === "special" ? null : eligibleKind(courseName);
 
   useEffect(() => {
     if (!userId || !kind) return;

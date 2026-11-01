@@ -12,6 +12,8 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
+import { oneHourLater, classScheduleDates, selectedClassName } from "@/lib/classScheduleDefaults";
+
 const courseOptions = [
   {
     name: "低空瑜珈 Lv.0",
@@ -147,6 +149,9 @@ export default function AdminCreateClass() {
     setSelectedCourse,
   ] = useState("");
 
+  const [specialName, setSpecialName] = useState("");
+  const [endNextDay, setEndNextDay] = useState(false);
+
   // 單堂
   const [date, setDate] =
     useState("");
@@ -220,6 +225,7 @@ export default function AdminCreateClass() {
 
   function resetForm() {
     setSelectedCourse("");
+    setSpecialName(""); setEndNextDay(false);
     setDate("");
     setMonth("");
     setWeekday(2);
@@ -313,6 +319,9 @@ export default function AdminCreateClass() {
       return;
     }
 
+    let actualCourseName: string;
+    try { actualCourseName = selectedClassName(course, specialName); }
+    catch (error) { setMessage((error as Error).message); return; }
     const parsedCapacity =
       Number(capacity);
 
@@ -377,15 +386,7 @@ export default function AdminCreateClass() {
     }
 
     // 用第一個日期確認時間是否合法
-    const testStartDate =
-      new Date(
-        `${datesToCreate[0]}T${startTime}:00+08:00`
-      );
-
-    const testEndDate =
-      new Date(
-        `${datesToCreate[0]}T${endTime}:00+08:00`
-      );
+    const { startDate: testStartDate, endDate: testEndDate } = classScheduleDates(datesToCreate[0], startTime, endTime, endNextDay);
 
     if (
       Number.isNaN(
@@ -421,7 +422,7 @@ export default function AdminCreateClass() {
       ) {
         const exists =
           await classAlreadyExists(
-            course.name,
+            actualCourseName,
             classDate,
             startTime
           );
@@ -431,21 +432,13 @@ export default function AdminCreateClass() {
           continue;
         }
 
-        const startDate =
-          new Date(
-            `${classDate}T${startTime}:00+08:00`
-          );
-
-        const endDate =
-          new Date(
-            `${classDate}T${endTime}:00+08:00`
-          );
+        const { startDate, endDate } = classScheduleDates(classDate, startTime, endTime, endNextDay);
 
         await addDoc(
           collection(db, "classes"),
           {
             courseName:
-              course.name,
+              actualCourseName,
 
             category:
               course.category,
@@ -631,6 +624,7 @@ export default function AdminCreateClass() {
                 </select>
               </div>
 
+              {course?.category === "special" && <div className="mt-5"><label className="mb-2 block font-semibold text-slate-800" htmlFor="special-course-name">特殊課程名稱</label><input id="special-course-name" required maxLength={100} value={specialName} onChange={event => setSpecialName(event.target.value)} placeholder="例如：春季空環編舞工作坊" className="w-full rounded-xl border border-slate-300 px-4 py-3" /></div>}
               {course?.category ===
                 "special" && (
                 <div className="mt-5">
@@ -844,6 +838,7 @@ export default function AdminCreateClass() {
               )}
 
               {/* 時間 */}
+              <p className="mt-5 text-sm text-slate-700">設定開始時間後，結束時間預設為一小時後；仍可手動調整。</p>
               <div className="mt-5 grid gap-5 sm:grid-cols-2">
                 <div>
                   <label className="mb-2 block font-semibold text-slate-800">
@@ -854,12 +849,13 @@ export default function AdminCreateClass() {
                     type="time"
                     required
                     value={startTime}
-                    onChange={(event) =>
-                      setStartTime(
-                        event.target
-                          .value
-                      )
-                    }
+                    onChange={event => {
+                      const value = event.target.value;
+                      setStartTime(value);
+                      const suggested = oneHourLater(value);
+                      setEndTime(suggested.endTime);
+                      setEndNextDay(suggested.nextDay);
+                    }}
                     className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-sky-500"
                   />
                 </div>
@@ -883,6 +879,7 @@ export default function AdminCreateClass() {
                   />
                 </div>
               </div>
+              <label className="mt-3 flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={endNextDay} onChange={event => setEndNextDay(event.target.checked)} />結束時間為隔日{endNextDay ? "（跨午夜）" : ""}</label>
 
               {/* 點數 / 名額 */}
               <div className="mt-5 grid gap-5 sm:grid-cols-2">

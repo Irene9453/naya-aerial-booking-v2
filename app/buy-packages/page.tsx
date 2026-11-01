@@ -38,6 +38,9 @@ type AvailableCoupon = {
   userCouponId?: string;
 };
 
+import { couponIsUsable, couponValidityLabel } from "@/lib/couponValidity";
+import MyCoupons from "@/components/MyCoupons";
+
 export default function BuyPackagesPage() {
   const router = useRouter();
 
@@ -100,7 +103,7 @@ const [birthdayUsedThisYear, setBirthdayUsedThisYear] = useState(true);
         unsubscribeBirthdayUsage = onSnapshot(
           doc(db, "birthdayCouponUsage", `${user.uid}_${birthdayYear}`),
           (snapshot) => {
-            setBirthdayUsedThisYear(snapshot.exists());
+            setBirthdayUsedThisYear(snapshot.exists() && snapshot.data()?.status !== "released");
             setBirthdayUsageLoaded(true);
           },
           (error) => {
@@ -196,13 +199,13 @@ setBirthdayDay(
           userCouponsQuery,
           (snapshot) => {
             const nextCoupons =
-              snapshot.docs.map((couponDocument) => {
+              snapshot.docs.filter(couponDocument => couponDocument.data().source !== "automatic_birthday" && couponIsUsable(couponDocument.data())).map((couponDocument) => {
                 const data = couponDocument.data();
 
                 return {
                   id: couponDocument.id,
                   source: "user_coupon" as const,
-                  name: String(data.name ?? ""),
+                  name: `${String(data.name ?? "")}（${couponValidityLabel(data)}）`,
                   discountRate: Number(
                     data.discountRate ?? 1
                   ),
@@ -379,6 +382,15 @@ const hasBirthdayBenefit =
       const requestId =
         `${userId}_${Date.now()}_${crypto.randomUUID()}`;
 
+      if (selectedCoupon?.source === "user_coupon" || selectedCoupon?.source === "birthday") {
+        const currentUser = auth.currentUser;
+        if (!currentUser) throw Error("請先登入。");
+        const response = await fetch("/api/coupons/purchase", { method: "POST", headers: { Authorization: `Bearer ${await currentUser.getIdToken()}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ couponSource: selectedCoupon.source, couponId: selectedCoupon.userCouponId ?? selectedCoupon.id, packageId: selectedPackage.id,
+            operationId: crypto.randomUUID().replace(/-/g, ""), paymentMethod, transferLastFive }) });
+        const result = await response.json();
+        if (!response.ok) throw Error(result.error ?? "購買申請失敗。");
+      } else {
       await setDoc(
         doc(db, "purchaseRequests", requestId),
         {
@@ -391,11 +403,7 @@ const hasBirthdayBenefit =
           originalPrice,
 
           // 優惠資料
-          couponId:
-            selectedCoupon?.source === "user_coupon"
-              ? selectedCoupon.userCouponId ??
-                selectedCoupon.id
-              : null,
+          couponId: null,
 
           couponCode:
             selectedCoupon?.id ?? null,
@@ -437,6 +445,7 @@ const hasBirthdayBenefit =
           createdAt: serverTimestamp(),
         }
       );
+      }
 
       setMessage(
         "購買申請已送出！完成付款後，請等待老師確認並加入點數。"
@@ -994,9 +1003,10 @@ const hasBirthdayBenefit =
           </div>
         )}
 
+        {(selectedCoupon?.source === "user_coupon" || selectedCoupon?.source === "birthday") && <p className="mt-4 rounded-xl bg-sky-50 p-4 text-sm leading-6 text-slate-700">優惠券以系統收到申請時是否仍在期限內判定；送出成功後，優惠會保留給這筆訂單，老師稍後核款不影響優惠。取消或拒絕後仍依原到期日判定。</p>}
         {/* 購買進度與歷史紀錄 */}
         {userId && (
-          <MyPurchaseRequests userId={userId} />
+          <><MyCoupons userId={userId} /><MyPurchaseRequests userId={userId} /></>
         )}
       </div>
     </section>

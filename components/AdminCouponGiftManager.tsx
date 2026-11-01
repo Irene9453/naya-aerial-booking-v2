@@ -5,7 +5,7 @@ import { collection, onSnapshot } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
 type Member = { id: string; name: string; phone: string; email: string; role: string };
-type Coupon = { id: string; name: string; isActive: boolean; discountRate: number };
+type Coupon = { expiryMode?: string; expiryDate?: string; validDays?: number; id: string; name: string; isActive: boolean; discountRate: number };
 type Result = { userId: string; status: "created" | "already_done" | "failed"; error?: string };
 
 export default function AdminCouponGiftManager() {
@@ -27,7 +27,7 @@ export default function AdminCouponGiftManager() {
         role: String(d.data().role ?? "student") })).filter(m => m.role === "student"));
     }, () => setMessage("會員讀取失敗。"));
     const stopCoupons = onSnapshot(collection(db, "coupons"), snap => {
-      setCoupons(snap.docs.map(d => ({ id: d.id, name: String(d.data().name ?? ""),
+      setCoupons(snap.docs.map(d => ({ expiryMode: String(d.data().expiryMode ?? "unlimited"), expiryDate: String(d.data().expiryDate ?? ""), validDays: Number(d.data().validDays ?? 0), id: d.id, name: String(d.data().name ?? ""),
         isActive: d.data().isActive === true, discountRate: Number(d.data().discountRate ?? 1) })));
     }, () => setMessage("優惠券讀取失敗。"));
     return () => { stopMembers(); stopCoupons(); };
@@ -82,6 +82,7 @@ export default function AdminCouponGiftManager() {
       <label>每人張數（1～10）<input disabled={busy} type="number" min={1} max={10} className="mt-1 w-full rounded-xl border p-3" value={quantity} onChange={e => setQuantity(Number(e.target.value))} /></label>
       <label className="md:col-span-2">贈送原因<textarea maxLength={200} disabled={busy} className="mt-1 w-full rounded-xl border p-3" rows={2} value={reason} onChange={e => setReason(e.target.value)} placeholder="例如：開幕感謝禮" /></label>
     </div>
+    {couponId && <p className="mt-3 text-sm text-slate-700">新領券期限：{(() => { const coupon = coupons.find(item => item.id === couponId); return coupon?.expiryMode === "date" ? `至 ${coupon.expiryDate} 當日 23:59` : coupon?.expiryMode === "days" ? `領取當日起 ${coupon.validDays} 天（含當日）` : "無期限"; })()}</p>}
     <input disabled={busy} className="mt-5 w-full rounded-xl border p-3" placeholder="搜尋姓名、電話或 Email" value={search} onChange={e => setSearch(e.target.value)} />
     <div className="mt-3 flex flex-wrap gap-2">
       <button disabled={busy} className="rounded-xl border px-3 py-2" onClick={() => setSelected(old => [...new Set([...old, ...filtered.map(m => m.id)])])}>全選搜尋結果（{filtered.length}）</button>

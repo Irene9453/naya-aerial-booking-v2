@@ -1,13 +1,17 @@
 import {
   doc,
+  getDoc,
   runTransaction,
   serverTimestamp,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { couponIsUsable } from "@/lib/couponValidity";
+import { paymentReceivedAt } from "@/lib/paymentReceivedAt";
+import { auth, db } from "@/lib/firebase";
 
 type CompletePurchaseRequestParams = {
   requestId: string;
   adminId: string;
+  paymentReceivedAtMillis?: number;
 };
 
 type RejectPurchaseRequestParams = {
@@ -19,7 +23,10 @@ type RejectPurchaseRequestParams = {
 export async function completePurchaseRequest({
   requestId,
   adminId,
+  paymentReceivedAtMillis,
 }: CompletePurchaseRequestParams) {
+  if ((await getDoc(doc(db, "purchaseRequests", requestId))).data()?.offerType === "reserved_coupon") return couponOrderAction({ requestId, action: "approve", paymentReceivedAtMillis });
+  const receivedAt = paymentReceivedAt(paymentReceivedAtMillis);
   const requestRef = doc(
     db,
     "purchaseRequests",
@@ -217,7 +224,7 @@ const userData = userSnapshot.data();
           `${userId}_${currentTaipeiYear}`
         );
         const birthdayUseSnapshot = await transaction.get(birthdayUseRef);
-        if (birthdayUseSnapshot.exists()) {
+        if (birthdayUseSnapshot.exists() && birthdayUseSnapshot.data()?.status !== "released") {
           throw new Error("此會員今年已使用過生日 7 折優惠。");
         }
         verifiedDiscountRate = 0.7;
@@ -248,8 +255,8 @@ const userData = userSnapshot.data();
         if (String(userCouponData.userId ?? "") !== userId) {
           throw new Error("此優惠券不屬於該會員");
         }
-        if (userCouponData.status !== "available") {
-          throw new Error("此優惠券已使用或目前無法使用");
+        if (!couponIsUsable(userCouponData)) {
+          throw new Error("此優惠券已到期、期限待核對、已使用或目前無法使用");
         }
 
         const minimumPackagePoints = Number(userCouponData.minimumPackagePoints ?? 0);
@@ -394,6 +401,7 @@ transaction.update(
           status: "completed",
           paymentStatus:
             "confirmed",
+          paymentReceivedAtMillis: receivedAt,
 
           reviewedBy: adminId,
           reviewedAt:
@@ -436,6 +444,7 @@ transaction.update(
           originalPrice,
           discountAmount,
           price: finalPrice,
+          paymentReceivedAtMillis: receivedAt,
 
           couponId:
             couponId || null,
@@ -559,6 +568,7 @@ export async function rejectPurchaseRequest({
   adminId,
   reason = "",
 }: RejectPurchaseRequestParams) {
+  if ((await getDoc(doc(db, "purchaseRequests", requestId))).data()?.offerType === "reserved_coupon") return couponOrderAction({ requestId, action: "reject", reason });
   const requestRef = doc(
     db,
     "purchaseRequests",
@@ -699,4 +709,13 @@ export async function rejectPurchaseRequest({
       };
     }
   );
+}
+
+async function couponOrderAction(body: { requestId: string; action: string; reason?: string; paymentReceivedAtMillis?: number }): Promise<{ requestId: string; packagePoints: number; newPointBalance: number }> {
+  const user = auth.currentUser;
+  if (!user) throw Error("請先登入管理員。");
+  const response = await fetch("/api/admin/coupons/orders", { method: "POST", headers: { Authorization: `Bearer ${await user.getIdToken()}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const result = await response.json();
+  if (!response.ok) throw Error(result.error ?? "優惠券訂單處理失敗。");
+  return result;
 }

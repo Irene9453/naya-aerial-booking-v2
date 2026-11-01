@@ -26,6 +26,7 @@ import BookingCalendar from "@/components/BookingCalendar";
 type ClassData = {
   id: string;
   courseName: string;
+  category: string;
   location: string;
   startTime: Timestamp;
   pointsRequired: number;
@@ -108,6 +109,7 @@ const [selectedCourse, setSelectedCourse] =
 
               return {
                 id: classDocument.id,
+                category: String(data.category ?? ""),
 
                 courseName: String(
                   data.courseName ?? ""
@@ -614,6 +616,7 @@ const groupedClasses =
               <BookClassButton
   classId={classItem.id}
   courseName={classItem.courseName}
+  courseCategory={classItem.category}
   pointsRequired={classItem.pointsRequired}
   isFull={isFull}
   startTime={classItem.startTime}

@@ -38,3 +38,9 @@ body {
     opacity: 1;
   }
 }
+
+/* Direct summary selectors keep nested disclosure labels independent. */
+[data-admin-section] > summary .admin-section-collapse { display: none; }
+[data-admin-section][open] > summary .admin-section-expand { display: none; }
+[data-admin-section][open] > summary .admin-section-collapse { display: inline; }
+[data-admin-section][open] > summary .admin-section-chevron { transform: rotate(180deg); }

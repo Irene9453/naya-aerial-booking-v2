@@ -2,8 +2,11 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Timestamp } from "firebase/firestore";
+
+import AdminSection from "@/components/AdminSection";
+import { groupAdminClasses, classTime, classEndTime, type AdminClassCategory } from "@/lib/adminClassGroups";
 
 import AdminCreateClass from "@/components/AdminCreateClass";
 import AdminEditClassLocation from "@/components/AdminEditClassLocation";
@@ -18,6 +21,7 @@ export type ClassData = {
   courseName: string;
   location?: string;
   startTime: Timestamp | null;
+  endTime?: Timestamp | null;
   pointsRequired: number;
   capacity: number;
   bookedCount: number;
@@ -89,83 +93,25 @@ function getMonthLabel(key: string) {
 export default function ClassManager({
   classes,
 }: ClassManagerProps) {
-  // null 表示尚未手動選擇，預設展開最新月份
-  const [expandedMonths, setExpandedMonths] = useState<
-    string[] | null
-  >(null);
-
-  // 先將所有課程由新到舊排列，再依月份分組
-  const monthGroups = useMemo<MonthGroup[]>(() => {
-    const sortedClasses = [...classes].sort((a, b) => {
-      const firstTime =
-        a.startTime?.toMillis() ?? -Infinity;
-
-      const secondTime =
-        b.startTime?.toMillis() ?? -Infinity;
-
-      return secondTime - firstTime;
-    });
-
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+  const categories = useMemo(() => groupAdminClasses(classes, now), [classes, now]);
+  const categoryLabels: Record<AdminClassCategory, { title: string; description: string; empty: string }> = {
+    upcoming: { title: "未來課程", description: "由近到遠排列，包含進行中的課程；未設定時間的課程放在最後。", empty: "目前沒有未來課程。" },
+    past: { title: "已結束課程", description: "最近結束的課程在前。舊資料若沒有結束時間，會依開始時間分類並標示。", empty: "目前沒有已結束課程。" },
+    cancelled: { title: "已取消課程", description: "依上課日期距離現在由近到遠排列，不混入未來或已結束課程。", empty: "目前沒有已取消課程。" },
+  };
+  function monthsFor(items: ClassData[]): MonthGroup[] {
     const groups = new Map<string, ClassData[]>();
-
-    for (const classItem of sortedClasses) {
-      const monthKey = getMonthKey(
-        classItem.startTime
-      );
-
-      if (!groups.has(monthKey)) {
-        groups.set(monthKey, []);
-      }
-
-      groups.get(monthKey)!.push(classItem);
+    for (const item of items) {
+      const key = getMonthKey(item.startTime);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(item);
     }
-
-    return Array.from(groups.entries()).map(
-      ([key, groupClasses]) => ({
-        key,
-        label: getMonthLabel(key),
-        classes: groupClasses,
-      })
-    );
-  }, [classes]);
-
-  const latestMonthKey =
-    monthGroups.find(
-      (group) => group.key !== "unscheduled"
-    )?.key;
-
-  // 初次載入展開最新月份，並排除已不存在的月份
-  const activeExpandedMonths =
-    expandedMonths === null
-      ? (latestMonthKey ? [latestMonthKey] : [])
-      : expandedMonths.filter((key) =>
-          monthGroups.some((group) => group.key === key)
-        );
-
-  function toggleMonth(monthKey: string) {
-    setExpandedMonths((previous) => {
-      const current =
-        previous ??
-        (latestMonthKey ? [latestMonthKey] : []);
-
-      if (current.includes(monthKey)) {
-        return current.filter(
-          (key) => key !== monthKey
-        );
-      }
-
-      return [...current, monthKey];
-    });
-  }
-
-  function expandAll() {
-    setExpandedMonths(
-      monthGroups.map((group) => group.key)
-    );
-  }
-
-  function collapseAll() {
-    setExpandedMonths([]);
+    return [...groups].map(([key, items]) => ({ key, label: getMonthLabel(key), classes: items }));
   }
 
   return (
@@ -201,177 +147,41 @@ export default function ClassManager({
         <ExportClassRecordsButton />
       </div>
 
-      {classes.length === 0 ? (
-        <div className="mt-7 rounded-2xl bg-slate-50 px-5 py-8 text-center">
-          <p className="text-slate-600">
-            目前尚未建立課程。
-          </p>
-        </div>
-      ) : (
-        <div className="mt-7 space-y-4">
-          {/* 月份操作按鈕 */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-slate-500">
-              共 {monthGroups.length} 個月份
-              · 最新課程優先
-            </p>
-
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={expandAll}
-                className="rounded-xl border border-sky-200 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-50"
-              >
-                全部展開
-              </button>
-
-              <button
-                type="button"
-                onClick={collapseAll}
-                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-              >
-                全部收合
-              </button>
-            </div>
+      <div className="mt-6">
+        {(["upcoming", "past", "cancelled"] as const).map(category => <AdminSection key={category}
+          title={categoryLabels[category].title} description={categoryLabels[category].description} count={categories[category].length}>
+          <div className="space-y-6 p-4 md:p-5">
+            {categories[category].length === 0 && <p className="rounded-xl bg-slate-50 p-5 text-slate-700">{categoryLabels[category].empty}</p>}
+            {monthsFor(categories[category]).map(month => <section key={month.key}>
+              <h3 className="mb-3 font-bold text-sky-800">{month.label}（{month.classes.length} 堂）</h3>
+              <div className="space-y-4">{month.classes.map(classItem => {
+                const start = classTime(classItem.startTime);
+                const end = classEndTime(classItem);
+                const ongoing = category === "upcoming" && start !== null && start <= now && end !== null && end > now;
+                const status = category === "cancelled" ? "已取消" : category === "past" ? "已結束" : ongoing ? "進行中" : classItem.status === "open" ? "開放中" : classItem.status;
+                return <article key={classItem.id} className="rounded-2xl border border-slate-200 bg-white p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-5">
+                    <div><h4 className="text-lg font-bold text-slate-900">{classItem.courseName}</h4>
+                      <p className="mt-2 text-sm text-slate-700">{formatDateTime(classItem.startTime)}</p>
+                      {!classItem.endTime && start !== null && start <= now && category !== "cancelled" && <p className="mt-1 text-sm text-amber-800">未記錄結束時間，依開始時間分類</p>}
+                      <AdminEditClassLocation classId={classItem.id} location={classItem.location ?? ""} />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 text-sm">
+                      <span className="rounded-full bg-sky-50 px-4 py-2 font-semibold text-sky-800">{classItem.pointsRequired} 點</span>
+                      <span className="rounded-full bg-slate-100 px-4 py-2 font-semibold text-slate-700">{classItem.bookedCount} / {classItem.capacity} 人</span>
+                      <span className={`rounded-full px-4 py-2 font-semibold ${category === "cancelled" ? "bg-red-50 text-red-800" : category === "past" ? "bg-slate-100 text-slate-700" : "bg-emerald-50 text-emerald-800"}`}>{status}</span>
+                      <ClassPreparationAssistant classId={classItem.id} courseName={classItem.courseName} />
+                      <AdminClassRoster classId={classItem.id} courseName={classItem.courseName} />
+                      <AdminCancelWholeClass classId={classItem.id} courseName={classItem.courseName} startTimeMillis={start} status={classItem.status} />
+                    </div>
+                  </div>
+                  <ClassLessonContent classId={classItem.id} />
+                </article>;
+              })}</div>
+            </section>)}
           </div>
-
-          {/* 月份分組 */}
-          {monthGroups.map((group) => {
-            const isExpanded =
-              activeExpandedMonths.includes(group.key);
-
-            return (
-              <div
-                key={group.key}
-                className="overflow-hidden rounded-2xl border border-slate-200"
-              >
-                {/* 月份標題 */}
-                <button
-                  type="button"
-                  onClick={() => toggleMonth(group.key)}
-                  aria-expanded={isExpanded}
-                  className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition ${
-                    isExpanded
-                      ? "bg-sky-50"
-                      : "bg-slate-50 hover:bg-sky-50"
-                  }`}
-                >
-                  <div className="flex flex-wrap items-center gap-3">
-                    <span className="text-lg font-bold text-slate-900">
-                      {group.label}
-                    </span>
-
-                    <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-sky-700">
-                      {group.classes.length} 堂課
-                    </span>
-                  </div>
-
-                  <span className="flex items-center gap-2 text-sm font-semibold text-sky-700">
-                    {isExpanded ? "收合" : "展開"}
-
-                    <svg
-                      className={`h-5 w-5 transition-transform ${
-                        isExpanded ? "rotate-180" : ""
-                      }`}
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      aria-hidden="true"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="m6 9 6 6 6-6"
-                      />
-                    </svg>
-                  </span>
-                </button>
-
-                {/* 該月份課程 */}
-                {isExpanded && (
-                  <div className="space-y-4 p-4 md:p-5">
-                    {group.classes.map((classItem) => (
-                      <div
-                        key={classItem.id}
-                        className="rounded-2xl border border-slate-200 bg-white p-5"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-5">
-                          <div>
-                            <h3 className="text-lg font-bold text-slate-900">
-                              {classItem.courseName}
-                            </h3>
-
-                            <p className="mt-2 text-sm text-slate-600">
-                              {formatDateTime(
-                                classItem.startTime
-                              )}
-                            </p>
-
-                            <AdminEditClassLocation
-                              classId={classItem.id}
-                              location={classItem.location ?? ""}
-                            />
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-3 text-sm">
-                            <span className="rounded-full bg-sky-50 px-4 py-2 font-semibold text-sky-700">
-                              {classItem.pointsRequired} 點
-                            </span>
-
-                            <span className="rounded-full bg-slate-100 px-4 py-2 font-semibold text-slate-700">
-                              {classItem.bookedCount} /{" "}
-                              {classItem.capacity} 人
-                            </span>
-
-                            <span
-                              className={`rounded-full px-4 py-2 font-semibold ${
-                                classItem.status === "open"
-                                  ? "bg-emerald-50 text-emerald-700"
-                                  : "bg-slate-100 text-slate-600"
-                              }`}
-                            >
-                              {classItem.status === "open"
-                                ? "開放中"
-                                : classItem.status}
-                            </span>
-
-                            <ClassPreparationAssistant
-                              classId={classItem.id}
-                              courseName={
-                                classItem.courseName
-                              }
-                            />
-
-                            <AdminClassRoster
-                              classId={classItem.id}
-                              courseName={
-                                classItem.courseName
-                              }
-                            />                            <AdminCancelWholeClass
-                              classId={classItem.id}
-                              courseName={classItem.courseName}
-                              startTimeMillis={
-                                classItem.startTime?.toMillis() ?? null
-                              }
-                              status={classItem.status}
-                            />
-
-                          </div>
-                        </div>
-
-                        <ClassLessonContent
-                          classId={classItem.id}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+        </AdminSection>)}
+      </div>
     </article>
   );
 }

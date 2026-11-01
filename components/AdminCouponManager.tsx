@@ -6,6 +6,8 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
+import { issueCouponValidity } from "@/lib/couponValidity";
+
 type CouponType = "new_student" | "birthday" | "reward";
 
 type Coupon = {
@@ -20,6 +22,9 @@ type Coupon = {
   description: string;
   automatic: boolean;
   isActive: boolean;
+  expiryMode?: "unlimited" | "date" | "days";
+  expiryDate?: string;
+  validDays?: number;
 };
 
 const blank = {
@@ -32,6 +37,9 @@ const blank = {
   order: "99",
   description: "",
   automatic: false,
+  expiryMode: "unlimited",
+  expiryDate: "",
+  validDays: "30",
 };
 
 export default function AdminCouponManager() {
@@ -82,6 +90,9 @@ export default function AdminCouponManager() {
       order: String(item.displayOrder ?? 99),
       description: item.description ?? "",
       automatic: Boolean(item.automatic),
+      expiryMode: item.expiryMode ?? "unlimited",
+      expiryDate: item.expiryDate ?? "",
+      validDays: String(item.validDays ?? 30),
     });
     setMessage("");
     setOpen(true);
@@ -110,6 +121,8 @@ export default function AdminCouponManager() {
     if (!Number.isSafeInteger(order) || order < 0)
       return setMessage("排序必須為非負整數。");
 
+    try { issueCouponValidity({ expiryMode: form.expiryMode, expiryDate: form.expiryDate, validDays: Number(form.validDays) }, Date.now(), true); }
+    catch (error) { return setMessage((error as Error).message); }
     setBusy(true);
     setMessage("");
 
@@ -123,6 +136,7 @@ export default function AdminCouponManager() {
         maximumPackagePoints: max,
         displayOrder: order,
         description: form.description.trim(),
+        expiryMode: form.expiryMode, expiryDate: form.expiryMode === "date" ? form.expiryDate : null, validDays: form.expiryMode === "days" ? Number(form.validDays) : null,
         automatic: form.type === "new_student" && form.automatic,
         updatedBy: user.uid,
         updatedAt: serverTimestamp(),
@@ -211,6 +225,7 @@ export default function AdminCouponManager() {
               類型：{item.type === "reward" ? "紅利兌換"
                 : item.type === "birthday" ? "生日優惠" : "新生優惠"}
             </p>
+            <p className="mt-2 text-sm text-slate-700">新領券期限：{item.expiryMode === "date" ? `至 ${item.expiryDate} 當日 23:59` : item.expiryMode === "days" ? `領取當日起 ${item.validDays} 天（含當日）` : "無期限"}</p>
             {item.type === "reward" && (
               <p className="text-sm">兌換需 {item.rewardCost} 紅利點</p>
             )}
@@ -283,6 +298,10 @@ export default function AdminCouponManager() {
                   onChange={(e) => change("max", e.target.value)} />
               </label>
 
+              <label>新領券期限<select className={inputClass} value={form.expiryMode} onChange={event => change("expiryMode", event.target.value)}><option value="unlimited">無期限</option><option value="date">指定到期日</option><option value="days">領取後 N 天（含領取當日）</option></select></label>
+              {form.expiryMode === "date" && <label>到期日（台灣時間 23:59）<input type="date" className={inputClass} value={form.expiryDate} onChange={event => change("expiryDate", event.target.value)} /></label>}
+              {form.expiryMode === "days" && <label>有效天數（1～3650）<input type="number" min={1} max={3650} className={inputClass} value={form.validDays} onChange={event => change("validDays", event.target.value)} /></label>}
+              <p className="text-sm text-slate-700 sm:col-span-2">此設定只影響之後新領取的券；已發出的券請至「優惠券期限管理」逐張補登或展延。</p>
               <label>顯示排序
                 <input type="number" className={inputClass}
                   value={form.order}

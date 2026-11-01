@@ -5,6 +5,8 @@ import { NEW_STUDENT_OFFERS, parseNewStudentOfferIds, summarizeNewStudentOffers,
 
 import { readNewStudentEligibility, eligibilityUserFields } from "@/lib/newStudentEligibility";
 
+import { paymentReceivedAt } from "@/lib/paymentReceivedAt";
+
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
@@ -35,6 +37,9 @@ export async function POST(request: NextRequest) {
     if (typeof requestId !== "string" || (!requestId.startsWith("new_student_") || requestId.includes("/"))) {
       return NextResponse.json({ error: "新生訂單編號不正確" }, { status: 400 });
     }
+    let receivedAt: number;
+    try { receivedAt = paymentReceivedAt((body as Record<string, unknown>).paymentReceivedAtMillis); }
+    catch { return NextResponse.json({ error: "實際入帳時間不正確。" }, { status: 400 }); }
     const orderRef = adminDb.collection("purchaseRequests").doc(requestId);
     // Legacy history is not fully normalized. Keep the rollout flag OFF until verified.
     // Recheck known regular purchases at approval, not only at order submission.
@@ -118,14 +123,14 @@ export async function POST(request: NextRequest) {
       tx.update(orderRef, {
         status: "completed", paymentStatus: "confirmed", reviewedBy: adminId,
         reviewedAt: FieldValue.serverTimestamp(), completedAt: FieldValue.serverTimestamp(),
-        pointBalanceAfter: pointsAfter,
+        pointBalanceAfter: pointsAfter, paymentReceivedAtMillis: receivedAt,
       });
       for (const check of checks) {
         const item = NEW_STUDENT_OFFERS[check.id];
         tx.create(check.saleRef, {
           requestId, adminId, studentId: userId, offerId: check.id, offerType: "new_student",
           packageId: `new_student_${check.id}`, packageName: item.name, points: item.points,
-          originalPrice: item.price, discountAmount: 0, price: item.price,
+          originalPrice: item.price, discountAmount: 0, price: item.price, paymentReceivedAtMillis: receivedAt,
           paymentMethod: order.paymentMethod, transferLastFive: order.transferLastFive ?? null,
           status: "completed", createdAt: FieldValue.serverTimestamp(),
         });

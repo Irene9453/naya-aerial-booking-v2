@@ -3,11 +3,14 @@ import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 import { couponTemplateFields } from "@/lib/couponTemplate";
 
+import { issueCouponValidity } from "@/lib/couponValidity";
+
 export const runtime = "nodejs";
 export const maxDuration = 60;
 const safeErrors = new Set([
   "操作識別碼已被其他贈券內容使用。", "找不到有效學生會員。", "管理員權限已變更。",
   "優惠券不存在或未啟用。", "優惠券折扣或適用點數資料無效。",
+  "優惠券已到期，無法發放或兌換。", "優惠券期限尚未確認，無法發放或兌換。", "優惠券期限設定不正確。", "優惠券到期日期格式不正確。", "優惠券到期日期不存在。",
 ]);
 
 export async function POST(request: NextRequest) {
@@ -66,8 +69,8 @@ export async function POST(request: NextRequest) {
           const template = templateSnapshot.data();
           if (!templateSnapshot.exists || template?.isActive !== true) throw Error("優惠券不存在或未啟用。");
           let fields;
-          try { fields = couponTemplateFields(template); }
-          catch { throw Error("優惠券折扣或適用點數資料無效。"); }
+          try { fields = { ...couponTemplateFields(template), ...issueCouponValidity(template) }; }
+          catch (error) { const message = error instanceof Error ? error.message : ""; throw Error(safeErrors.has(message) ? message : "優惠券折扣或適用點數資料無效。"); }
           const giftIds: string[] = [];
           for (let index = 0; index < (quantity as number); index++) {
             const giftId = `gift_${operationId}_${userId}_${index}`;

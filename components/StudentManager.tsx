@@ -11,6 +11,8 @@ import ExportStudentLessonRecordsButton from "@/components/ExportStudentLessonRe
 import AddLegacyStudentButton from "@/components/AddLegacyStudentButton";
 import StudentJourneyModal from "@/components/StudentJourneyModal";
 
+import { couponValidityLabel, couponIsUsable, couponDeadline } from "@/lib/couponValidity";
+
 export type StudentData = {
   id: string;
   name: string;
@@ -88,7 +90,7 @@ export default function StudentManager({
           const data = item.data();
 
           if (
-            data.status === "available" &&
+            couponIsUsable(data) &&
             typeof data.userId === "string"
           ) {
             counts[data.userId] = (counts[data.userId] ?? 0) + 1;
@@ -1224,9 +1226,10 @@ phone:
                           </p>
                           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold">
                             {coupon.status === "available"
-                              ? "可使用"
+                              ? couponIsUsable(coupon) ? "可使用" : couponDeadline(coupon) === undefined ? "期限待核對" : "已到期"
                               : coupon.status === "used"
                                 ? "已使用"
+                                : coupon.status === "reserved" ? "待核款保留中"
                                 : String(coupon.status ?? "狀態未知")}
                           </span>
                         </div>
@@ -1238,6 +1241,7 @@ phone:
                                 : "未提供"
                             }
                           </p>
+                          <p>期限：{couponValidityLabel(coupon)}</p>
                           <p>取得方式：{String(coupon.source ?? "未記錄")}</p>
                           <p>優惠券 ID：{String(coupon.couponId ?? "—")}</p>
                           <p>紀錄 ID：{String(coupon.id ?? "—")}</p>

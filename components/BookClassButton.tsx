@@ -25,6 +25,7 @@ import {
 type BookClassButtonProps = {
   classId: string;
   courseName: string;
+  courseCategory?: string;
   pointsRequired: number;
   isFull: boolean;
   startTime: Timestamp;
@@ -85,6 +86,7 @@ function formatClassTime(timestamp: Timestamp) {
 export default function BookClassButton({
   classId,
   courseName,
+  courseCategory,
   pointsRequired,
   isFull,
   startTime,
@@ -948,6 +950,7 @@ if (alreadyBooked) {
               <TrialVoucherChoice
                 userId={auth.currentUser.uid}
                 courseName={courseName}
+                courseCategory={courseCategory}
                 value={selectedTrialVoucherId}
                 onChange={setSelectedTrialVoucherId}
                 disabled={isBooking}

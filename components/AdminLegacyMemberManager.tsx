@@ -3,11 +3,14 @@
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import { auth, db } from "@/lib/firebase";
+import AdminSection from "@/components/AdminSection";
 import { AdminLegacyClaimReview } from "@/components/AdminLegacyClaimReview";
 
 type LegacyCoupon = {
   couponId: string;
   quantity: number;
+  expiresOn?: string | null;
+  expiresOnByIndex?: Array<string | null>;
 };
 
 type CouponOption = {
@@ -38,6 +41,7 @@ type StatusFilter = "all" | "unclaimed" | "claimed";
 
 type ApiResult = {
   success?: boolean;
+  status?: string; reason?: string; purchasingEnabled?: boolean; emailVerified?: boolean | null; unavailableOfferIds?: string[];
   error?: string;
   created?: number;
   skipped?: number;
@@ -86,6 +90,7 @@ async function adminPost(path: string, body: unknown): Promise<ApiResult> {
 
 export function AdminLegacyMemberManager() {
   const [members, setMembers] = useState<LegacyMember[]>([]);
+  const [checkingEligibilityId, setCheckingEligibilityId] = useState<string | null>(null);
   const [historyMember, setHistoryMember] = useState<LegacyMember | null>(null);
   const [historyStatus, setHistoryStatus] = useState<LegacyMember["purchaseHistoryStatus"]>("unknown");
   const [historyEvidence, setHistoryEvidence] = useState("");
@@ -141,6 +146,8 @@ export function AdminLegacyMemberManager() {
               ? data.coupons.map((entry: Record<string, unknown>) => ({
                   couponId: String(entry.couponId ?? ""),
                   quantity: Number(entry.quantity ?? 0),
+                  ...(entry.expiresOn !== undefined ? { expiresOn: entry.expiresOn as string | null } : {}),
+                  ...(Array.isArray(entry.expiresOnByIndex) ? { expiresOnByIndex: entry.expiresOnByIndex as Array<string | null> } : {}),
                 }))
               : [],
             status:
@@ -348,6 +355,15 @@ export function AdminLegacyMemberManager() {
       setIsBatchSaving(false);
     }
   }
+ async function checkNewStudentEligibility(member: LegacyMember) {
+    setCheckingEligibilityId(member.id); setMessage("");
+    try {
+      const result = await adminPost("/api/admin/new-student-offers/eligibility", { legacyMemberId: member.id });
+      const reasons: Record<string, string> = { member_account_unlinked: "未找到對應會員帳號，請確認註冊手機與舊資料綁定。", phone_registry_mismatch: "手機綁定資料不一致，需要核對。", legacy_purchase_history_pending: "舊系統購課紀錄尚未確認。", legacy_identity_conflict: "舊資料已綁定其他帳號或綁定狀態不一致。", regular_purchase: "有一般課卡購買紀錄。", legacy_purchase: "有舊系統購課紀錄。", eligibility_consumed: "新生優惠資格已結束。", history_incomplete: "舊會員歷史資料核對開關尚未開啟。", not_student: "帳號不是學生身分。", legacy_claim_review: "認領資料仍待核對。" };
+      const resultText = result.status !== "eligible" ? reasons[result.reason ?? ""] ?? `資格待確認：${result.reason ?? "未知原因"}` : result.emailVerified === false ? "Email 尚未驗證。" : !result.purchasingEnabled ? "資格符合，但正式購買開關尚未開啟。" : "資格符合，購買功能已開放。";
+      setMessage(`${member.name}｜${resultText}${result.unavailableOfferIds?.length ? ` 有 ${result.unavailableOfferIds.length} 項優惠已申請或已購買。` : ""}（僅查詢，未修改資格或建立訂單）`);
+    } catch (error) { setMessage((error as Error).message); } finally { setCheckingEligibilityId(null); }
+  }
  async function savePurchaseHistory() {
     if (!historyMember) return;
     setHistoryBusy(true); setHistoryMessage("");
@@ -362,7 +378,7 @@ export function AdminLegacyMemberManager() {
   }
  return (
   <section className="mt-8 rounded-3xl bg-white p-7 shadow-sm md:p-8">
-    <AdminLegacyClaimReview />
+    <AdminSection title="舊會員認領審核"><AdminLegacyClaimReview /></AdminSection>
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-600">Legacy Migration</p>
@@ -397,7 +413,7 @@ export function AdminLegacyMemberManager() {
                   setHistoryMember(member); setHistoryStatus(member.purchaseHistoryStatus); setHistoryEvidence(member.purchaseHistoryEvidence); setHistoryMessage("");
                 }} className="rounded-lg border border-sky-300 px-3 py-2 font-semibold text-sky-800">
                   {member.purchaseHistoryStatus === "never_purchased" ? "從未購課" : member.purchaseHistoryStatus === "purchased" ? "曾購課" : "待確認"}｜核對
-                </button></td>
+                </button><button type="button" disabled={checkingEligibilityId !== null} onClick={() => void checkNewStudentEligibility(member)} className="mt-2 block rounded-lg border border-emerald-700 px-3 py-2 font-semibold text-emerald-800">{checkingEligibilityId === member.id ? "檢查中……" : "檢查新生資格"}</button></td>
                 <td className="px-3 py-4">{member.status === "unclaimed" ? <div className="flex gap-2"><button type="button" onClick={() => openEdit(member)} className="rounded-lg border border-violet-200 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50">編輯</button><button type="button" onClick={() => setDeletingMember(member)} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50">刪除</button></div> : <span className="text-xs text-slate-400">已鎖定</span>}</td>
               </tr>
             ))}</tbody>
@@ -484,6 +500,8 @@ export function AdminLegacyMemberManager() {
                                 ? [...remaining, {
                                     couponId: option.id,
                                     quantity: value,
+                                    ...(current?.expiresOn !== undefined ? { expiresOn: current.expiresOn } : {}),
+                                    ...(current?.expiresOnByIndex ? { expiresOnByIndex: Array.from({ length: value }, (_, i) => i < current.expiresOnByIndex!.length ? current.expiresOnByIndex![i] : current.expiresOn ?? "") } : {}),
                                   }]
                                 : remaining;
                             });

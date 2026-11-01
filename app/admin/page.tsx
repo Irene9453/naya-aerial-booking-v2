@@ -12,6 +12,8 @@ import {
 } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
+import AdminCouponValidityManager from "@/components/AdminCouponValidityManager";
+import AdminSection from "@/components/AdminSection";
 import AdminTodayClasses from "@/components/AdminTodayClasses";
 import AdminPackageManager from "@/components/AdminPackageManager";
 import StudentManager from "@/components/StudentManager";
@@ -53,6 +55,7 @@ type ClassData = {
   courseName: string;
   location: string;
   startTime: Timestamp | null;
+  endTime: Timestamp | null;
   pointsRequired: number;
   capacity: number;
   bookedCount: number;
@@ -233,6 +236,7 @@ journeyLegacyClasses: Number(
                       data.startTime instanceof Timestamp
                         ? data.startTime
                         : null,
+                    endTime: data.endTime instanceof Timestamp ? data.endTime : null,
                     pointsRequired: Number(data.pointsRequired ?? 0),
                     capacity: Number(data.capacity ?? 0),
                     bookedCount: Number(data.bookedCount ?? 0),
@@ -312,7 +316,7 @@ allowMonthlyBooking: Boolean(
           </p>
         </div>
 
-        <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <AdminSection title="後台總覽" description="會員人數與課程數量"><div className="grid gap-6 p-5 sm:grid-cols-2 lg:grid-cols-3">
   <article className="rounded-3xl bg-white p-7 shadow-sm">
     <p className="text-sm font-semibold text-slate-500">
       會員人數
@@ -344,38 +348,39 @@ allowMonthlyBooking: Boolean(
       ).length}
     </p>
   </article>
-</div>
+</div></AdminSection>
 
 {/* 今日課程 */}
-<AdminTodayClasses classes={classes} />
+<AdminSection title="今日課程"><AdminTodayClasses classes={classes} /></AdminSection>
 
 {/* 購買申請 */}
-<AdminPurchaseRequests />
+<AdminSection title="購買申請"><AdminPurchaseRequests /></AdminSection>
 
 {/* 課程管理 */}
-<ClassManager classes={classes} />
+<AdminSection title="課程管理"><ClassManager classes={classes} /></AdminSection>
 
 {/* 舊會員移轉管理 */}
-<AdminLegacyMemberManager />
+<AdminSection title="舊會員移轉管理"><AdminLegacyMemberManager /></AdminSection>
 {/* 會員管理 */}
-<StudentManager students={students} />
+<AdminSection title="會員與點數"><StudentManager students={students} /></AdminSection>
 
 {/* 里程碑獎勵管理 */}
-<AdminMilestoneRewards />
+<AdminSection title="里程碑獎勵管理"><AdminMilestoneRewards /></AdminSection>
 
-<AdminSpecialLeaveManager />
-<MovementLibrary />
+<AdminSection title="特殊請假管理"><AdminSpecialLeaveManager /></AdminSection>
+<AdminSection title="動作資料庫"><MovementLibrary /></AdminSection>
 
 {/* 課卡管理 */}
-<AdminPackageManager />
+<AdminSection title="課卡商品管理"><AdminPackageManager /></AdminSection>
 
 {/* 優惠管理 */}
-<AdminCouponManager />
-      <AdminCouponGiftManager />
-      <AdminLegacyCouponAudit />
+<AdminSection title="優惠券管理"><AdminCouponManager /></AdminSection>
+      <AdminSection title="優惠券期限管理"><AdminCouponValidityManager /></AdminSection>
+      <AdminSection title="管理員贈券"><AdminCouponGiftManager /></AdminSection>
+      <AdminSection title="舊會員優惠券核對"><AdminLegacyCouponAudit /></AdminSection>
 
 {/* 收入統計 */}
-<AdminRevenueSummary />
+<AdminSection title="收入統計"><AdminRevenueSummary /></AdminSection>
 
 {message && (
   <p className="mt-6 text-center text-sm text-red-600">

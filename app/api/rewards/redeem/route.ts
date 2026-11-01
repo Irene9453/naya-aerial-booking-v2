@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 
+import { issueCouponValidity } from "@/lib/couponValidity";
+import { couponTemplateFields } from "@/lib/couponTemplate";
+
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
@@ -140,6 +143,9 @@ export async function POST(request: NextRequest) {
 
       const couponName = String(couponData.name ?? "");
 
+      const validity = issueCouponValidity(couponData);
+      const templateFields = couponTemplateFields(couponData);
+
       tx.update(userRef, {
         rewardPoints: newRewardBalance,
       });
@@ -147,6 +153,8 @@ export async function POST(request: NextRequest) {
       tx.create(userCouponRef, {
         userId,
         couponId,
+        ...templateFields,
+        ...validity,
         name: couponName,
         type: "reward",
         discountRate,
@@ -195,6 +203,9 @@ export async function POST(request: NextRequest) {
       "會員紅利資料不正確",
       "優惠券兌換點數設定不正確",
       "優惠券折扣設定不正確",
+      "優惠券已到期，無法發放或兌換。",
+      "優惠券期限尚未確認，無法發放或兌換。",
+      "優惠券期限設定不正確。",
     ];
 
     const isInsufficientPoints =

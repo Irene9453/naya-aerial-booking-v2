@@ -15,11 +15,16 @@ import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import { redeemCoupon } from "@/lib/redeemCouponService";
 
+import { couponValidityLabel, couponIsUsable, couponDeadline, templateValidityLabel, templateCanIssue } from "@/lib/couponValidity";
+
 type RewardCouponData = {
   id: string;
   name: string;
   discountRate: number;
   rewardCost: number;
+  expiryMode?: string;
+  expiryDate?: string;
+  validDays?: number;
   description: string;
   displayOrder: number;
   isActive: boolean;
@@ -32,10 +37,13 @@ type UserCouponData = {
   name: string;
   discountRate: number;
   status: string;
+  source?: string;
+  expiryMode?: string;
+  expiresAtMillis?: number | null;
 };
 
 function formatDiscount(discountRate: number) {
-  return `${Math.round(discountRate * 100)} 折`;
+  return `${Number((discountRate * 10).toFixed(2))} 折`;
 }
 
 export default function RewardsPage() {
@@ -108,6 +116,7 @@ export default function RewardsPage() {
           name: String(data.name ?? ""),
           discountRate: Number(data.discountRate ?? 1),
           rewardCost: Number(data.rewardCost ?? 0),
+          expiryMode: String(data.expiryMode ?? "unlimited"), expiryDate: String(data.expiryDate ?? ""), validDays: Number(data.validDays ?? 0),
           description: String(data.description ?? ""),
           displayOrder: Number(data.displayOrder ?? 0),
           isActive: Boolean(data.isActive ?? false),
@@ -151,9 +160,11 @@ export default function RewardsPage() {
                   discountRate: Number(
                     data.discountRate ?? 1
                   ),
-                  status: String(
-                    data.status ?? ""
-                  ),
+                  source: String(data.source ?? ""),
+                  expiryMode: data.expiryMode,
+                  expiresAtMillis: data.expiresAtMillis,
+                  status: data.status === "available" && !couponIsUsable(data)
+                    ? couponDeadline(data) === undefined ? "expiry_unknown" : "expired" : String(data.status ?? ""),
                 };
               });
 
@@ -293,8 +304,9 @@ export default function RewardsPage() {
 
           <div className="mt-7 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
             {coupons.map((coupon) => {
+              const templateAvailable = templateCanIssue(coupon);
               const canRedeem =
-                rewardPoints >= coupon.rewardCost;
+                rewardPoints >= coupon.rewardCost && templateAvailable;
 
               const isRedeeming =
                 redeemingCouponId === coupon.id;
@@ -315,6 +327,7 @@ export default function RewardsPage() {
                   <p className="mt-2 text-sm leading-6 text-slate-500">
                     {coupon.description}
                   </p>
+                  <p className="mt-2 text-sm font-semibold text-slate-700">{templateValidityLabel(coupon)}</p>
 
                   <div className="mt-5 rounded-2xl bg-slate-50 p-4">
                     <p className="text-sm text-slate-500">
@@ -346,7 +359,7 @@ export default function RewardsPage() {
                   >
                     {isRedeeming
                       ? "兌換中……"
-                      : canRedeem
+                      : !templateAvailable ? "已到期或期限待確認" : canRedeem
                         ? "立即兌換"
                         : `還差 ${
                             coupon.rewardCost -
@@ -384,6 +397,7 @@ export default function RewardsPage() {
                       <h3 className="text-lg font-bold text-slate-900">
                         {coupon.name}
                       </h3>
+                      <p className="mt-2 text-sm text-slate-700">{couponValidityLabel(coupon)}</p>
 
                       <p className="mt-2 text-2xl font-bold text-sky-700">
                         {formatDiscount(
@@ -397,7 +411,7 @@ export default function RewardsPage() {
                         ? "可使用"
                         : coupon.status === "used"
                           ? "已使用"
-                          : coupon.status}
+                          : coupon.status === "reserved" ? "待核款保留中" : coupon.status === "expired" ? "已到期" : coupon.status === "expiry_unknown" ? "期限待核對" : coupon.status}
                     </span>
                   </div>
                 </div>

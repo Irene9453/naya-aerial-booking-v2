@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
       let voucherOfferId: TrialOfferId | null = null;
       if (usesTrialVoucher) {
         const courseName = String(classData.courseName ?? "");
-        const eligibleOfferId = getEligibleTrialOffer(courseName);
+        const eligibleOfferId = classData.category === "special" ? null : getEligibleTrialOffer(courseName);
         if (!eligibleOfferId) throw new Error("這堂課不適用新生體驗券");
         const expectedVoucherId = `new_student_${userId}_${eligibleOfferId}`;
         if (trialVoucherId !== expectedVoucherId) throw new Error("體驗券與課程種類不符");

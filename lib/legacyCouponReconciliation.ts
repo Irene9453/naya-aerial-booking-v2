@@ -2,6 +2,8 @@ import { FieldValue, type Firestore, type Transaction, type DocumentReference } 
 import { parseLegacyCoupons } from "@/lib/legacyCouponTransfer";
 import { couponTemplateFields } from "@/lib/couponTemplate";
 
+import { legacyCouponValidity, couponIsUsable } from "@/lib/couponValidity";
+
 export type LegacyCouponReport = {
   legacyMemberId: string; name: string; userId: string | null;
   expected: number; existing: number; available: number; missing: number;
@@ -64,13 +66,13 @@ export async function planLegacyCouponReconciliation(tx: Transaction, db: Firest
           return stop("needs_review", "既有移轉券的歸屬或狀態異常，不自動補發。");
         }
         report.existing++;
-        if (data.status === "available") report.available++;
+        if (couponIsUsable(data)) report.available++;
         continue;
       }
       let fields;
       try { if (!template.exists) throw Error(); fields = couponTemplateFields(template.data()!); }
       catch { return stop("needs_review", "缺少可核對的優惠券商品或折扣設定，請先確認。"); }
-      items.push({ ref, data: { userId: uid, couponId: coupon.couponId, ...fields,
+      items.push({ ref, data: { userId: uid, couponId: coupon.couponId, ...fields, ...legacyCouponValidity(coupon, i),
         status: "available", rewardCost: 0, source: "legacy_claim", legacyMemberId,
         issuedAt: FieldValue.serverTimestamp(), usedAt: null, purchaseRequestId: null } });
     }

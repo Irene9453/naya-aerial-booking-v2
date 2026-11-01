@@ -16,6 +16,8 @@ import {
   rejectPurchaseRequest,
 } from "@/lib/purchaseRequestService";
 
+import { parseTaipeiPaymentInput, taipeiPaymentInput } from "@/lib/paymentReceivedAt";
+
 type PurchaseRequestData = {
   id: string;
   userId: string;
@@ -338,7 +340,7 @@ export default function AdminPurchaseRequests() {
       request.couponSource ===
         "birthday" &&
       request.birthdayMonth !==
-        currentTaipeiMonth
+        currentTaipeiMonth && request.offerType !== "reserved_coupon"
     ) {
       window.alert(
         "此會員目前不是生日月份，無法確認生日優惠訂單。"
@@ -355,6 +357,11 @@ export default function AdminPurchaseRequests() {
       return;
     }
 
+    const paymentInput = window.prompt("請確認實際入帳時間（台灣時間 YYYY-MM-DD HH:mm）。收入依此日期歸屬，不依今天的核准時間。", taipeiPaymentInput().replace("T", " "));
+    if (paymentInput === null) return;
+    let paymentReceivedAtMillis: number;
+    try { paymentReceivedAtMillis = parseTaipeiPaymentInput(paymentInput); }
+    catch (error) { window.alert(error instanceof Error ? error.message : "入帳時間不正確。"); return; }
     setUpdatingRequestId(request.id);
     setMessage("");
 
@@ -367,7 +374,7 @@ export default function AdminPurchaseRequests() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ requestId: request.id }),
+          body: JSON.stringify({ requestId: request.id, paymentReceivedAtMillis }),
         });
         const result: { error?: string; packageName?: string; voucherIssued?: boolean; pointsAdded?: number } =
           await response.json();
@@ -377,6 +384,7 @@ export default function AdminPurchaseRequests() {
         const result = await completePurchaseRequest({
           requestId: request.id,
           adminId: admin.uid,
+          paymentReceivedAtMillis,
         });
         setMessage(
           `購買完成！${request.studentName} 已增加 ${result.packagePoints} 點，目前共有 ${result.newPointBalance} 點。`
@@ -393,6 +401,32 @@ export default function AdminPurchaseRequests() {
     } finally {
       setUpdatingRequestId("");
     }
+  }
+
+  async function retainLegacyCoupon(request: PurchaseRequestData) {
+    const evidence = window.prompt("只適用更新前送出的舊申請。請核對原申請時間、原券期限、實際商品與折扣，填寫核對依據（10～500 字）；不是重新申請，也不會發放點數。");
+    if (evidence === null) return;
+    if (evidence.trim().length < 10 || evidence.length > 500) { window.alert("請填寫 10～500 字的核對依據。"); return; }
+    const user = auth.currentUser; if (!user) return;
+    setUpdatingRequestId(request.id);
+    try { const response = await fetch("/api/admin/coupons/retain-legacy", { method: "POST", headers: { Authorization: `Bearer ${await user.getIdToken()}`, "Content-Type": "application/json" }, body: JSON.stringify({ requestId: request.id, evidence }) });
+      const result = await response.json(); if (!response.ok) throw Error(result.error ?? "核對失敗。"); setMessage("舊申請優惠已保留，可更正匯款資料或繼續確認收款；尚未發放點數。");
+    } catch (error) { setMessage((error as Error).message); } finally { setUpdatingRequestId(""); }
+  }
+
+  async function correctCouponPayment(request: PurchaseRequestData) {
+    const lastFive = window.prompt("更正這筆原訂單的匯款末五碼（不會重建訂單或取消保留優惠）", request.transferLastFive);
+    if (lastFive === null) return;
+    const reason = window.prompt("請填寫更正原因（至少 2 字）");
+    if (reason === null) return;
+    if (!/^\d{5}$/.test(lastFive) || reason.trim().length < 2) { window.alert("請輸入正確末五碼與更正原因。"); return; }
+    const user = auth.currentUser; if (!user) return;
+    setUpdatingRequestId(request.id);
+    try {
+      const response = await fetch("/api/admin/coupons/orders", { method: "POST", headers: { Authorization: `Bearer ${await user.getIdToken()}`, "Content-Type": "application/json" }, body: JSON.stringify({ action: "update_payment", requestId: request.id, transferLastFive: lastFive, reason }) });
+      const result = await response.json(); if (!response.ok) throw Error(result.error ?? "更正失敗。");
+      setMessage("匯款資料已更正，原申請的優惠繼續保留。");
+    } catch (error) { setMessage((error as Error).message); } finally { setUpdatingRequestId(""); }
   }
 
   async function handleReject(
@@ -722,13 +756,15 @@ export default function AdminPurchaseRequests() {
                   >
                     拒絕申請
                   </button>
+                  {request.offerType !== "reserved_coupon" && ["user_coupon", "birthday"].includes(request.couponSource) && <button type="button" disabled={isUpdating} onClick={() => void retainLegacyCoupon(request)} className="rounded-xl border border-sky-700 px-5 py-3 font-semibold text-sky-800">核對舊申請保留優惠</button>}
+                  {request.offerType === "reserved_coupon" && request.paymentMethod === "transfer" && <button type="button" disabled={isUpdating} onClick={() => void correctCouponPayment(request)} className="rounded-xl border border-sky-700 px-5 py-3 font-semibold text-sky-800">更正匯款資料</button>}
 
                   <button
                     type="button"
                     disabled={
                       isUpdating ||
                       (isBirthdayOrder &&
-                        !isBirthdayMonth)
+                        !isBirthdayMonth && request.offerType !== "reserved_coupon")
                     }
                     onClick={() =>
                       handleComplete(request)
