@@ -22,7 +22,7 @@ export default function NewStudentOffers() {
   const [message, setMessage] = useState("");
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState<NewStudentOfferId | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState("transfer");
+  const paymentMethod = "transfer";
   const [lastFive, setLastFive] = useState("");
 
   const checkEligibility = useCallback(async () => {
@@ -88,12 +88,7 @@ export default function NewStudentOffers() {
         className="mt-3 rounded-xl border border-amber-300 px-4 py-2 disabled:opacity-50">重新確認資格</button>
       {enabled && (
         <div className="mt-4 flex flex-wrap gap-4">
-          <label>付款方式
-            <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} disabled={busy !== null}
-              className="ml-2 rounded border p-2">
-              <option value="transfer">銀行轉帳</option><option value="linepay_money">LINE Pay Money</option>
-            </select>
-          </label>
+          <p>付款方式：銀行轉帳</p>
           {paymentMethod === "transfer" && <label>轉出帳號末五碼
             <input value={lastFive} onChange={e => setLastFive(e.target.value.replace(/\D/g, "").slice(0, 5))}
               disabled={busy !== null} inputMode="numeric" maxLength={5} className="ml-2 w-24 rounded border p-2" />
