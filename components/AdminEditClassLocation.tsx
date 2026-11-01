@@ -13,11 +13,13 @@ const LOCATIONS = [
 type Props = {
   classId: string;
   location: string;
+  hideLocation?: boolean;
 };
 
 export default function AdminEditClassLocation({
   classId,
   location,
+  hideLocation = false,
 }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState(location);
@@ -56,10 +58,10 @@ export default function AdminEditClassLocation({
 
   if (!isEditing) {
     return (
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <span className="text-sm text-slate-600">
+      <div className="flex flex-wrap items-center gap-2">
+        {!hideLocation && <span className="text-sm text-slate-600">
           📍 {location || "地點待確認"}
-        </span>
+        </span>}
 
         <button
           type="button"
@@ -68,7 +70,7 @@ export default function AdminEditClassLocation({
             setMessage("");
             setIsEditing(true);
           }}
-          className="rounded-lg border border-sky-200 px-3 py-1.5 text-sm font-semibold text-sky-700 hover:bg-sky-50"
+          className="rounded-lg border border-sky-200 px-3 py-2 text-sm font-semibold text-sky-700 hover:bg-sky-50"
         >
           修改地點
         </button>

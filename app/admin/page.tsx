@@ -300,7 +300,7 @@ allowMonthlyBooking: Boolean(
   </section>;
 
   return (
-    <section className="min-h-screen bg-slate-50 px-6 py-12 md:py-20">
+    <section className="min-h-screen bg-slate-50 px-3 py-6 sm:px-6 md:py-20">
       <div className="mx-auto max-w-6xl">
         <div className="rounded-3xl bg-slate-900 p-8 text-white shadow-lg md:p-10">
           <p className="text-sm font-semibold uppercase tracking-[0.25em] text-sky-300">

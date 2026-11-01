@@ -67,7 +67,13 @@ export async function POST(request: NextRequest) {
 
     const result = await adminDb.runTransaction(async (tx) => {
       // 第一階段：先完成所有讀取，之後才開始寫入。
-      const classSnapshot = await tx.get(classRef);
+      const [classSnapshot, adminSnapshot] = await Promise.all([
+        tx.get(classRef),
+        tx.get(adminDb.collection("users").doc(adminUid)),
+      ]);
+      if (adminSnapshot.data()?.role !== "admin") {
+        throw new CancelError("FORBIDDEN", "管理員權限已變更，請重新登入。", 403);
+      }
 
       if (!classSnapshot.exists) {
         throw new CancelError("CLASS_NOT_FOUND", "找不到課程資料。", 404);
@@ -97,11 +103,11 @@ export async function POST(request: NextRequest) {
 
       const bookingQuery = adminDb
         .collection("bookings")
-        .where("classId", "==", classId)
-        .where("status", "==", "booked");
+        .where("classId", "==", classId);
 
       const bookingSnapshot = await tx.get(bookingQuery);
-      const activeBookings = bookingSnapshot.docs;
+      // 單欄查詢不依賴正式站另行建立複合索引；狀態仍在交易快照內篩選。
+      const activeBookings = bookingSnapshot.docs.filter(doc => doc.data().status === "booked");
 
       if (activeBookings.length > 50) {
         throw new CancelError(
@@ -271,12 +277,13 @@ export async function POST(request: NextRequest) {
       // 讀取所有仍在候補中的會員
       const waitlistQuery = adminDb
         .collection("waitlists")
-        .where("classId", "==", classId)
-        .where("status", "==", "waiting");
+        .where("classId", "==", classId);
 
       const waitlistSnapshot = await tx.get(waitlistQuery);
 
-      if (waitlistSnapshot.size > 50) {
+      const waitingEntries = waitlistSnapshot.docs.filter(doc => doc.data().status === "waiting");
+
+      if (waitingEntries.length > 50) {
         throw new CancelError(
           "TOO_MANY_WAITLISTS",
           "候補人數超出單次安全處理範圍，請聯絡系統管理員。"
@@ -348,7 +355,7 @@ export async function POST(request: NextRequest) {
       }
 
       // 整堂取消後，所有等待中的候補一併取消
-      for (const waitlistDoc of waitlistSnapshot.docs) {
+      for (const waitlistDoc of waitingEntries) {
         tx.update(waitlistDoc.ref, {
           status: "cancelled",
           cancelledAt: FieldValue.serverTimestamp(),
@@ -392,9 +399,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json(
-      { error: "整堂取消失敗，請檢查系統紀錄後再試。" },
-      { status: 500 }
-    );
+    const detail = error instanceof Error ? error.message : "";
+    const errorCode = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+    const diagnostic = /Firebase Admin|environment|credential|private key|PEM/i.test(detail)
+      ? { code: "ADMIN_CONFIGURATION", error: "伺服器 Firebase 管理員設定不完整，請檢查此部署的環境變數。" }
+      : errorCode === "9" || errorCode === "failed-precondition"
+        ? { code: "DATABASE_PRECONDITION", error: "資料庫查詢設定尚未就緒，請管理員核對伺服器紀錄。" }
+        : errorCode === "7" || errorCode === "permission-denied"
+          ? { code: "DATABASE_PERMISSION", error: "伺服器沒有資料庫存取權限，請管理員核對服務帳號設定。" }
+          : { code: "CLASS_CANCEL_INTERNAL", error: "整堂取消失敗，請提供錯誤代碼供管理員核對伺服器紀錄。" };
+    return NextResponse.json(diagnostic, { status: 500 });
   }
 }

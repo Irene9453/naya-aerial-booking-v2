@@ -66,15 +66,15 @@ export default function AdminCancelWholeClass({
         body: JSON.stringify({ classId }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({ error: `伺服器回應異常（HTTP ${response.status}），請稍後再試。` }));
 
       if (!response.ok || data.success !== true) {
-        throw new Error(data.error || "整堂取消失敗。");
+        throw new Error(`${data.error || "整堂取消失敗。"}${data.code ? `（${data.code}）` : ""}`);
       }
 
       setMessage(
         `取消完成：${data.cancelledBookings} 筆有效預約，` +
-        `共退還 ${data.refundedPoints} 點。`
+        `共退還 ${data.refundedPoints} 點、${data.refundedTrialVouchers ?? 0} 張體驗券。`
       );
 
       router.refresh();
@@ -100,7 +100,7 @@ export default function AdminCancelWholeClass({
             : "整堂取消並退還所有有效預約點數"
         }
       >
-        {busy ? "取消處理中……" : "整堂取消（選擇 A）"}
+        {busy ? "取消處理中……" : "整堂取消"}
       </button>
 
       {message && (
