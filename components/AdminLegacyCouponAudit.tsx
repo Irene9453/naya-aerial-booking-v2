@@ -22,7 +22,7 @@ export default function AdminLegacyCouponAudit() {
       method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     const result = await response.json();
-    if (!response.ok) throw Error(result.error ?? "優惠券核對失敗。");
+    if (!response.ok) throw Object.assign(Error(result.error ?? "優惠券核對失敗。"), { code: result.code });
     return result;
   }
   async function audit(append = false) {
@@ -43,7 +43,10 @@ export default function AdminLegacyCouponAudit() {
       const updated = await post({ action: "audit", legacyMemberId: row.legacyMemberId });
       setRows(current => current.map(item => item.legacyMemberId === row.legacyMemberId ? updated.results[0] : item));
       setMessage(result.result.created > 0 ? `已為 ${row.name} 補齊 ${result.result.created} 張券，並留下補發紀錄。` : `未新增優惠券：${result.result.detail}`);
-    } catch (error) { setMessage(`${error instanceof Error ? error.message : "補發中斷。"} 請重新核對；已補齊的券不會重複發放。`); }
+    } catch (error) {
+      const quota = error && typeof error === "object" && "code" in error && error.code === "FIRESTORE_QUOTA_EXCEEDED";
+      setMessage(`${error instanceof Error ? error.message : "補發中斷。"} ${quota ? "待資料庫恢復後再核對補發結果，請勿改用贈券重複補發。" : "請重新核對；已補齊的券不會重複發放。"}`);
+    }
     finally { setBusy(false); }
   }
   return <section className="mt-8 rounded-3xl bg-white p-5 text-slate-900 shadow-sm md:p-8">

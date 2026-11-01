@@ -10,7 +10,7 @@ function fixture() {
   let clock = Date.now();
   class ClockDate extends Date { constructor(...args) { super(...(args.length ? args : [clock])); } static now() { return clock; } }
   const env = { NODE_ENV: "production", NAYA_NEW_STUDENT_APPROVAL_ENABLED: "true", NAYA_LEGACY_HISTORY_COMPLETE: "true" };
-  const data = new Map(); let queue = Promise.resolve(), counter = 0;
+  const reads = []; const data = new Map(); let queue = Promise.resolve(), counter = 0;
   const snap = key => ({ id: key.split('/').at(-1), exists: data.has(key), data: () => clone(data.get(key)) });
   function collection(name) {
     const query = { collection: name, filters: [], max: Infinity, after: null,
@@ -21,6 +21,7 @@ function fixture() {
     return query;
   }
   function read(ref) {
+    reads.push(ref.key ?? `query:${ref.collection}`);
     if (ref.key) return snap(ref.key);
     const docs = [...data].filter(([key, value]) => key.startsWith(ref.collection + '/') &&
       key.split('/').length === 2 && ref.filters.every(([field, wanted]) => value[field] === wanted) &&
@@ -61,7 +62,7 @@ function fixture() {
     return cache[name] = module.exports;
   }
   const request = (body, token = 'admin') => new Request('http://localhost/test', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: typeof body === 'string' ? body : JSON.stringify(body) });
-  const f = { data, db, auth, load, request, env, beforeTransaction: null, setNow: value => { clock = value; } };
+  const f = { data, reads, db, auth, load, request, env, beforeTransaction: null, setNow: value => { clock = value; } };
   data.set('users/admin', { role: 'admin' });
   data.set('users/student', { role: 'student', points: 5, rewardPoints: 3, journeyLegacyClasses: 0 });
   data.set('users/other', { role: 'student' });
@@ -232,3 +233,6 @@ test('admin eligibility diagnostic reports qualified member without modifying ac
 test('diagnostic distinguishes purchasing flag disabled from member eligibility',async()=>{const f=diagnosticFixture();f.env.NAYA_NEW_STUDENT_APPROVAL_ENABLED='false';const result=await(await diagnose(f)).json();assert.equal(result.status,'eligible');assert.equal(result.purchasingEnabled,false)});
 test('diagnostic points out phone registry mismatch',async()=>{const f=diagnosticFixture();f.data.get('phoneRegistry/0912345678').userId='other';const result=await(await diagnose(f)).json();assert.equal(result.status,'pending');assert.equal(result.reason,'phone_registry_mismatch')});
 test('legacy Firestore microsecond timestamp is retained at millisecond precision',async()=>{const f=fixture();const id=await issued(f,{expiryMode:'date',expiresAtMillis:Date.parse('2026-11-01T00:00:00+08:00')});oldOrder(f,id);f.data.get('purchaseRequests/old_pending').createdAt.nanoseconds=123456;f.setNow(Date.parse('2026-11-03T12:00:00+08:00'));assert.equal((await retainOld(f,'old_pending')).status,200);assert.ok(Number.isSafeInteger(f.data.get('purchaseRequests/old_pending').couponReservedAtMillis))});
+
+test('coupon audit quota error reports resource limit without issuing anything',async()=>{const f=fixture();f.beforeTransaction=()=>{throw Object.assign(Error('Quota exceeded.'),{code:8})};const before=JSON.stringify([...f.data]);const response=await f.audit();assert.equal(response.status,503);assert.equal((await response.json()).code,'FIRESTORE_QUOTA_EXCEEDED');assert.equal(JSON.stringify([...f.data]),before)});
+test('paged audit reuses legacy snapshots and existing coupon query results',async()=>{const f=fixture();existing(f,1,'available');existing(f,2,'used');f.reads.length=0;const response=await f.audit();assert.equal(response.status,200);assert.equal((await response.json()).results[0].status,'complete');assert.equal(f.reads.filter(key=>key==='legacyMembers/legacy1').length,0);assert.equal(f.reads.filter(key=>key.startsWith('userCoupons/')).length,0);assert.equal(f.reads.filter(key=>key.startsWith('coupons/')).length,0)});

@@ -17,8 +17,6 @@ function fixture() {
   function read(value) {
     if (f.readError) throw f.readError;
     if (value.key) return snap(value.key);
-    // Fixture intentionally has no custom composite indexes.
-    if (value.filters.length > 1) throw Object.assign(Error('query requires index'), { code: 9 });
     const docs = [...data].filter(([key, valueData]) => key.split('/').length === 2 && key.startsWith(`${value.name}/`) && value.filters.every(([field,wanted]) => valueData[field] === wanted)).map(([key]) => snap(key));
     return { docs, size: docs.length, empty: docs.length === 0 };
   }
@@ -41,6 +39,7 @@ function fixture() {
       if(id==='next/server')return {NextResponse:{json:(value,options)=>new Response(JSON.stringify(value),options)}};
       if(id==='firebase-admin/firestore')return {Timestamp,FieldValue:{serverTimestamp:()=>Timestamp.fromMillis(now)}};
       if(id==='@/lib/firebaseAdmin')return {adminAuth:auth,adminDb:db};
+      if(id.startsWith('@/lib/'))return load(id.slice(2)+'.ts');
       throw Error(id);
     }});return module.exports;
   };
@@ -54,7 +53,7 @@ function fixture() {
   f.booking=(id='booking',patch={})=>{data.set(`bookings/${id}`,{userId:'student',classId:'course',status:'booked',pointsUsed:3,paymentType:'points',classStartTime:Timestamp.fromMillis(start),...patch});data.get('classes/course').bookedCount++;};
   return f;
 }
-test('empty future class cancels with zero refunds and no custom index',async()=>{const f=fixture(),r=await f.cancel();assert.equal(r.status,200);const b=await r.json();assert.equal(b.cancelledBookings,0);assert.equal(b.refundedPoints,0);assert.equal(f.data.get('classes/course').status,'cancelled');assert.equal(f.data.get('users/student').points,5)});
+test('empty future class cancels with zero refunds',async()=>{const f=fixture(),r=await f.cancel();assert.equal(r.status,200);const b=await r.json();assert.equal(b.cancelledBookings,0);assert.equal(b.refundedPoints,0);assert.equal(f.data.get('classes/course').status,'cancelled');assert.equal(f.data.get('users/student').points,5)});
 test('point refunds and waiting cancellation are atomic; unrelated statuses remain',async()=>{const f=fixture();f.booking();f.data.set('waitlists/w',{classId:'course',userId:'other',status:'waiting'});f.data.set('waitlists/old',{classId:'course',status:'converted'});f.data.set('bookings/old',{classId:'course',status:'cancelled',userId:'student',pointsUsed:3});const r=await f.cancel();assert.equal(r.status,200);assert.equal(f.data.get('users/student').points,8);assert.equal(f.data.get('bookings/booking').status,'admin_cancelled');assert.equal(f.data.get('waitlists/w').status,'cancelled');assert.equal(f.data.get('waitlists/old').status,'converted');assert.equal(f.data.get('bookings/old').status,'cancelled')});
 test('trial voucher refund restores voucher without adding points',async()=>{const f=fixture();f.booking('booking',{paymentType:'trial_voucher',pointsUsed:0,trialVoucherId:'voucher'});f.data.set('trialVouchers/voucher',{userId:'student',status:'used',bookingId:'booking',quantity:0});const r=await f.cancel();assert.equal(r.status,200);assert.equal((await r.json()).refundedTrialVouchers,1);assert.equal(f.data.get('trialVouchers/voucher').status,'available');assert.equal(f.data.get('users/student').points,5)});
 test('concurrent cancellation never refunds twice',async()=>{const f=fixture();f.booking();const rs=await Promise.all([f.cancel(),f.cancel()]);assert.deepEqual(rs.map(r=>r.status).sort(),[200,409]);assert.equal(f.data.get('users/student').points,8)});
@@ -96,3 +95,7 @@ test('declining confirmation never submits a schedule update',async()=>{const f=
 test('cancellation rechecks role inside the transaction',async()=>{const f=fixture();f.beforeTransaction=()=>{f.data.get('users/admin').role='student'};assert.equal((await f.cancel()).status,403);assert.equal(f.data.get('classes/course').status,'open')});
 test('two independent schedule editors cannot silently overwrite each other',async()=>{const f=fixture();const rs=await Promise.all([f.schedule(),f.schedule({operationId:'another-operation',startTimeMillis:f.start+172800000,endTimeMillis:f.end+172800000})]);assert.deepEqual(rs.map(r=>r.status),[200,409]);assert.equal(f.data.get('classes/course').startTime.toMillis(),f.start+86400000)});
 test('large schedule changes stop before any writes',async()=>{const f=fixture();for(let i=0;i<451;i++)f.data.set('studentLessonRecords/r'+i,{classId:'course'});const before=JSON.stringify([...f.data]);assert.equal((await f.schedule()).status,409);assert.equal(JSON.stringify([...f.data]),before)});
+
+test('quota failure on cancellation and schedule returns 503 without financial writes',async()=>{for(const action of ['cancel','schedule']){const f=fixture();f.booking();const before=JSON.stringify([...f.data]);f.readError=Object.assign(Error('Quota exceeded.'),{code:8});const response=await f[action]();assert.equal(response.status,503);assert.equal((await response.json()).code,'FIRESTORE_QUOTA_EXCEEDED');assert.equal(JSON.stringify([...f.data]),before)}});
+test('quota error recognition supports numeric, SDK and gRPC messages',()=>{const f=fixture(),{isFirestoreQuotaError}=f.load('lib/firestoreQuota.ts');for(const error of [{code:8},{code:'resource-exhausted'},{code:'firestore/resource-exhausted'},{message:'8 RESOURCE_EXHAUSTED: Quota exceeded.'}])assert.equal(isFirestoreQuotaError(error),true);assert.equal(isFirestoreQuotaError({code:7,message:'permission denied'}),false)});
+test('per-class details only mount contents after first expansion and preserve them on close',()=>{let opened=false;const module={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root,'components/AdminClassDisclosure.tsx'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,{module,exports:module.exports,require:id=>id==='react'?{useState:()=>[opened,next=>{opened=next}]}:{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})}});const child={type:'listener'};const render=()=>module.exports.default({title:'上課內容',children:child});let tree=render();assert.equal(tree.props.children[1],false);tree.props.onToggle({currentTarget:{open:true}});assert.equal(render().props.children[1],child);tree.props.onToggle({currentTarget:{open:false}});assert.equal(render().props.children[1],child)});

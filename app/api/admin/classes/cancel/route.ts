@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 
+import { isFirestoreQuotaError, firestoreQuotaMessage } from "@/lib/firestoreQuota";
+
 export const runtime = "nodejs";
 
 class CancelError extends Error {
@@ -103,11 +105,11 @@ export async function POST(request: NextRequest) {
 
       const bookingQuery = adminDb
         .collection("bookings")
-        .where("classId", "==", classId);
+        .where("classId", "==", classId)
+        .where("status", "==", "booked");
 
       const bookingSnapshot = await tx.get(bookingQuery);
-      // 單欄查詢不依賴正式站另行建立複合索引；狀態仍在交易快照內篩選。
-      const activeBookings = bookingSnapshot.docs.filter(doc => doc.data().status === "booked");
+      const activeBookings = bookingSnapshot.docs;
 
       if (activeBookings.length > 50) {
         throw new CancelError(
@@ -277,11 +279,12 @@ export async function POST(request: NextRequest) {
       // 讀取所有仍在候補中的會員
       const waitlistQuery = adminDb
         .collection("waitlists")
-        .where("classId", "==", classId);
+        .where("classId", "==", classId)
+        .where("status", "==", "waiting");
 
       const waitlistSnapshot = await tx.get(waitlistQuery);
 
-      const waitingEntries = waitlistSnapshot.docs.filter(doc => doc.data().status === "waiting");
+      const waitingEntries = waitlistSnapshot.docs;
 
       if (waitingEntries.length > 50) {
         throw new CancelError(
@@ -397,6 +400,10 @@ export async function POST(request: NextRequest) {
         { error: error.message, code: error.code },
         { status: error.statusCode }
       );
+    }
+
+    if (isFirestoreQuotaError(error)) {
+      return NextResponse.json({ error: firestoreQuotaMessage, code: "FIRESTORE_QUOTA_EXCEEDED" }, { status: 503 });
     }
 
     const detail = error instanceof Error ? error.message : "";

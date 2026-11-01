@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { FieldPath } from "firebase-admin/firestore";
+import { FieldPath, type DocumentSnapshot } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 import { planLegacyCouponReconciliation } from "@/lib/legacyCouponReconciliation";
+
+import { isFirestoreQuotaError, firestoreQuotaMessage } from "@/lib/firestoreQuota";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -20,10 +22,13 @@ export async function POST(request: NextRequest) {
     try { body = await request.json(); } catch { return NextResponse.json({ error: "資料格式錯誤。" }, { status: 400 }); }
     if (!body || typeof body !== "object" || !["audit", "repair"].includes(body.action)) return NextResponse.json({ error: "請指定核對或補發操作。" }, { status: 400 });
     const safeId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 200 && !value.includes("/");
-    const inspect = (id: string, repair: boolean) => adminDb.runTransaction(async tx => {
-      const currentAdmin = await tx.get(adminRef);
-      if (!currentAdmin.exists || currentAdmin.data()?.role !== "admin") throw Error("沒有管理員權限。");
-      const plan = await planLegacyCouponReconciliation(tx, adminDb, id);
+    const inspect = (id: string, repair: boolean, legacySnapshot?: DocumentSnapshot) => adminDb.runTransaction(async tx => {
+      if (repair) {
+        const currentAdmin = await tx.get(adminRef);
+        if (!currentAdmin.exists || currentAdmin.data()?.role !== "admin") throw Error("沒有管理員權限。");
+      }
+      // 純核對沿用本批快照；補發則必須在交易內重新讀取。
+      const plan = await planLegacyCouponReconciliation(tx, adminDb, id, repair ? undefined : legacySnapshot);
       const created = repair ? plan.write(uid) : 0;
       return { ...plan.report, created };
     });
@@ -42,11 +47,12 @@ export async function POST(request: NextRequest) {
     const page = await query.get();
     const results = [];
     for (let i = 0; i < page.docs.length; i += 4) {
-      results.push(...await Promise.all(page.docs.slice(i, i + 4).map(doc => inspect(doc.id, false))));
+      results.push(...await Promise.all(page.docs.slice(i, i + 4).map(doc => inspect(doc.id, false, doc))));
     }
     return NextResponse.json({ results, nextCursor: page.docs.length === 20 ? page.docs.at(-1)!.id : null });
   } catch (error) {
     console.error("舊會員優惠券核對失敗", error);
+    if (isFirestoreQuotaError(error)) return NextResponse.json({ error: firestoreQuotaMessage, code: "FIRESTORE_QUOTA_EXCEEDED" }, { status: 503 });
     const forbidden = error instanceof Error && error.message === "沒有管理員權限。";
     return NextResponse.json({ error: forbidden ? error.message : "核對失敗，請稍後重試；沒有自動重發優惠券。" }, { status: forbidden ? 403 : 500 });
   }

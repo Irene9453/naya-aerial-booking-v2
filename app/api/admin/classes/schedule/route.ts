@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 
+import { isFirestoreQuotaError, firestoreQuotaMessage } from "@/lib/firestoreQuota";
+
 export const runtime = "nodejs";
 class ScheduleError extends Error {
   constructor(message: string, public status = 409) { super(message); }
@@ -81,6 +83,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
     console.error("修改課程時間失敗：", error);
+    if (isFirestoreQuotaError(error)) return NextResponse.json({ error: firestoreQuotaMessage, code: "FIRESTORE_QUOTA_EXCEEDED" }, { status: 503 });
     return NextResponse.json({ error: error instanceof ScheduleError ? error.message : "修改時間失敗，請稍後重試。" }, { status: error instanceof ScheduleError ? error.status : 500 });
   }
 }

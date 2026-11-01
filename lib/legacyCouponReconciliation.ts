@@ -1,4 +1,4 @@
-import { FieldValue, type Firestore, type Transaction, type DocumentReference } from "firebase-admin/firestore";
+import { FieldValue, type Firestore, type Transaction, type DocumentReference, type DocumentSnapshot } from "firebase-admin/firestore";
 import { parseLegacyCoupons } from "@/lib/legacyCouponTransfer";
 import { couponTemplateFields } from "@/lib/couponTemplate";
 
@@ -12,9 +12,9 @@ export type LegacyCouponReport = {
 };
 
 // Read phase shared by the audit and repair. Never changes used or reserved coupons.
-export async function planLegacyCouponReconciliation(tx: Transaction, db: Firestore, legacyMemberId: string) {
+export async function planLegacyCouponReconciliation(tx: Transaction, db: Firestore, legacyMemberId: string, legacySnapshot?: DocumentSnapshot) {
   const legacyRef = db.collection("legacyMembers").doc(legacyMemberId);
-  const snapshot = await tx.get(legacyRef);
+  const snapshot = legacySnapshot ?? await tx.get(legacyRef);
   if (!snapshot.exists) throw Error("找不到舊會員資料。");
   const legacy = snapshot.data()!;
   const report: LegacyCouponReport = { legacyMemberId, name: String(legacy.name ?? "未填姓名"), userId: null,
@@ -46,7 +46,8 @@ export async function planLegacyCouponReconciliation(tx: Transaction, db: Firest
   const expectedIds = new Set(coupons.flatMap(coupon => Array.from({ length: coupon.quantity }, (_, i) =>
     `legacy_${legacyMemberId}_${coupon.couponId}_${i + 1}`)));
   const couponIds = new Set(coupons.map(coupon => coupon.couponId));
-  for (const doc of [...owned.docs, ...linked.docs]) {
+  const existingSnapshots = new Map([...owned.docs, ...linked.docs].map(doc => [doc.id, doc]));
+  for (const doc of existingSnapshots.values()) {
     const data = doc.data();
     const legacySource = String(data.source ?? "").startsWith("legacy") || doc.id.startsWith("legacy_");
     if ((data.legacyMemberId === legacyMemberId || (legacySource && couponIds.has(data.couponId))) &&
@@ -55,10 +56,10 @@ export async function planLegacyCouponReconciliation(tx: Transaction, db: Firest
     }
   }
   for (const coupon of coupons) {
-    const template = await tx.get(db.collection("coupons").doc(coupon.couponId));
+    let template: DocumentSnapshot | undefined;
     for (let i = 1; i <= coupon.quantity; i++) {
       const ref = db.collection("userCoupons").doc(`legacy_${legacyMemberId}_${coupon.couponId}_${i}`);
-      const current = await tx.get(ref);
+      const current = existingSnapshots.get(ref.id) ?? await tx.get(ref);
       if (current.exists) {
         const data = current.data()!;
         if (data.userId !== uid || data.couponId !== coupon.couponId || data.legacyMemberId !== legacyMemberId ||
@@ -69,6 +70,7 @@ export async function planLegacyCouponReconciliation(tx: Transaction, db: Firest
         if (couponIsUsable(data)) report.available++;
         continue;
       }
+      template ??= await tx.get(db.collection("coupons").doc(coupon.couponId));
       let fields;
       try { if (!template.exists) throw Error(); fields = couponTemplateFields(template.data()!); }
       catch { return stop("needs_review", "缺少可核對的優惠券商品或折扣設定，請先確認。"); }

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Timestamp } from "firebase/firestore";
 
+import AdminClassDisclosure from "@/components/AdminClassDisclosure";
 import AdminSection from "@/components/AdminSection";
 import { groupAdminClasses, classTime, classEndTime, type AdminClassCategory } from "@/lib/adminClassGroups";
 
@@ -179,8 +180,7 @@ export default function ClassManager({
                     <span className="font-semibold">{classItem.bookedCount} / {classItem.capacity} 人</span>
                     <span>📍 {classItem.location || "地點待確認"}</span>
                   </div>
-                  <details className="mt-3 border-t border-slate-100 pt-2">
-                    <summary className="cursor-pointer text-sm font-semibold text-sky-800">管理操作</summary>
+                  <AdminClassDisclosure title="管理操作">
                     <div className="mt-3 flex min-w-0 flex-wrap items-start gap-2">
                       <AdminClassRoster classId={classItem.id} courseName={classItem.courseName} />
                       <AdminEditClassSchedule classId={classItem.id} startTimeMillis={start} endTimeMillis={classTime(classItem.endTime)} status={classItem.status} />
@@ -188,11 +188,10 @@ export default function ClassManager({
                       <ClassPreparationAssistant classId={classItem.id} courseName={classItem.courseName} />
                       <AdminCancelWholeClass classId={classItem.id} courseName={classItem.courseName} startTimeMillis={start} status={classItem.status} />
                     </div>
-                  </details>
-                  <details className="mt-2 border-t border-slate-100 pt-2">
-                    <summary className="cursor-pointer text-sm font-semibold text-slate-700">上課內容</summary>
+                  </AdminClassDisclosure>
+                  <AdminClassDisclosure title="上課內容">
                     <ClassLessonContent classId={classItem.id} />
-                  </details>
+                  </AdminClassDisclosure>
                 </article>;
               })}</div>
             </section>)}
