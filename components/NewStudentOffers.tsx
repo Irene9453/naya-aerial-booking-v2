@@ -74,6 +74,7 @@ export default function NewStudentOffers() {
   }
 
   const enabled = eligibility?.status === "eligible" && eligibility.purchasingEnabled;
+  if (!eligibility || eligibility.status === "ineligible") return null;
   return (
     <section className="mt-10 rounded-3xl border border-amber-200 bg-amber-50/50 p-6 md:p-8">
       <h2 className="text-2xl font-bold text-slate-900">新生限定優惠</h2>
