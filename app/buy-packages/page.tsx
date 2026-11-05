@@ -35,10 +35,15 @@ type AvailableCoupon = {
   | "birthday";
   name: string;
   discountRate: number;
+  discountType?: "percentage" | "fixed_amount";
+  fixedDiscountAmount?: number;
+  minimumPackagePoints?: number;
+  maximumPackagePoints?: number | null;
   userCouponId?: string;
 };
 
 import { couponIsUsable, couponValidityLabel } from "@/lib/couponValidity";
+import { couponDiscountAmount, couponDiscountLabel, couponDiscountFields } from "@/lib/couponDiscount";
 import MyCoupons from "@/components/MyCoupons";
 
 export default function BuyPackagesPage() {
@@ -206,9 +211,11 @@ setBirthdayDay(
                   id: couponDocument.id,
                   source: "user_coupon" as const,
                   name: `${String(data.name ?? "")}（${couponValidityLabel(data)}）`,
-                  discountRate: Number(
-                    data.discountRate ?? 1
-                  ),
+                  discountRate: Number(data.discountRate ?? 1),
+                  discountType: data.discountType === "fixed_amount" ? "fixed_amount" as const : "percentage" as const,
+                  fixedDiscountAmount: Number(data.fixedDiscountAmount ?? 0),
+                  minimumPackagePoints: Number(data.minimumPackagePoints ?? 0),
+                  maximumPackagePoints: data.maximumPackagePoints == null ? null : Number(data.maximumPackagePoints),
                   userCouponId: couponDocument.id,
                 };
               });
@@ -264,7 +271,11 @@ const hasBirthdayBenefit =
   birthdayMonth === currentTaipeiMonth;
   const selectableCoupons = useMemo(() => {
   const nextCoupons: AvailableCoupon[] = [
-    ...availableCoupons,
+    ...availableCoupons.filter((coupon) =>
+      selectedPackage &&
+      selectedPackage.points >= (coupon.minimumPackagePoints ?? 0) &&
+      (coupon.maximumPackagePoints == null || selectedPackage.points <= coupon.maximumPackagePoints)
+    ),
   ];
 
   // 生日當月 7 折
@@ -332,12 +343,9 @@ const hasBirthdayBenefit =
   const originalPrice =
     selectedPackage?.price ?? 0;
 
-  const discountRate =
-    selectedCoupon?.discountRate ?? 1;
-
-  const discountAmount = Math.round(
-    originalPrice * (1 - discountRate)
-  );
+  const discountAmount = selectedCoupon
+    ? couponDiscountAmount(originalPrice, selectedCoupon)
+    : 0;
 
   const finalPrice =
     originalPrice - discountAmount;
@@ -690,8 +698,7 @@ const hasBirthdayBenefit =
                             </p>
 
                             <p className="mt-1 text-xs text-slate-500">
-                              {Number((coupon.discountRate * 10).toFixed(1))}{" "}
-                              折
+                              {couponDiscountLabel(coupon)}
                             </p>
                           </div>
                         </div>
