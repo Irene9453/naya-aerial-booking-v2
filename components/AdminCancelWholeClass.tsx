@@ -19,6 +19,7 @@ export default function AdminCancelWholeClass({
 }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [message, setMessage] = useState("");
 
   const hasValidStartTime =
@@ -26,7 +27,7 @@ export default function AdminCancelWholeClass({
     Number.isFinite(startTimeMillis) &&
     startTimeMillis > 0;
 
-  async function handleCancel() {
+  function handleCancel() {
     setMessage("");
 
     if (!hasValidStartTime || startTimeMillis <= Date.now()) {
@@ -39,12 +40,16 @@ export default function AdminCancelWholeClass({
       return;
     }
 
-    const confirmed = window.confirm(
-      `確定整堂取消「${courseName}」嗎？\n\n` +
-      "系統會取消所有有效預約並退還已扣點數，此操作無法直接復原。"
-    );
+    setShowCancelConfirm(true);
+  }
 
-    if (!confirmed) return;
+  async function executeCancel() {
+    if (busy) return;
+    setShowCancelConfirm(false);
+    if (!hasValidStartTime || startTimeMillis === null || startTimeMillis <= Date.now() || status !== "open") {
+      setMessage("課程已開始或不再開放，已停止取消。");
+      return;
+    }
 
     const user = auth.currentUser;
     if (!user) {
@@ -100,8 +105,29 @@ export default function AdminCancelWholeClass({
             : "整堂取消並退還所有有效預約點數"
         }
       >
-        {busy ? "取消處理中……" : "整堂取消（選擇 A）"}
+        {busy ? "取消處理中……" : "整堂取消"}
       </button>
+
+      {showCancelConfirm && (
+        <div role="presentation" className="fixed inset-0 z-[500] flex items-center justify-center bg-slate-900/60 p-4">
+          <div role="alertdialog" aria-modal="true" aria-labelledby="whole-cancel-title" aria-describedby="whole-cancel-description" className="w-full max-w-md rounded-2xl bg-white p-6 text-slate-900 shadow-2xl">
+            <h2 id="whole-cancel-title" className="text-xl font-bold text-red-700">確認整堂取消課程</h2>
+            <p className="mt-3 font-semibold">{courseName}</p>
+            <p className="mt-1 text-sm text-slate-600">
+              {hasValidStartTime && startTimeMillis !== null
+                ? new Date(startTimeMillis).toLocaleString("zh-TW", { timeZone: "Asia/Taipei", year: "numeric", month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })
+                : "課程時間未設定"}
+            </p>
+            <p id="whole-cancel-description" className="mt-4 rounded-xl bg-red-50 p-4 text-sm leading-6 text-red-900">
+              這是整堂取消，不是取消單一學生。確認後會取消所有有效預約，並依原規則退還點數。此操作無法直接復原。
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button type="button" disabled={busy} onClick={() => setShowCancelConfirm(false)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">返回</button>
+              <button type="button" disabled={busy} onClick={() => void executeCancel()} className="rounded-xl bg-red-700 px-4 py-2 font-semibold text-white disabled:opacity-50">{busy ? "處理中……" : "確認整堂取消"}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {message && (
         <p role="status" className="max-w-sm text-sm text-slate-600">
