@@ -43,7 +43,7 @@ type AvailableCoupon = {
 };
 
 import { couponIsUsable, couponValidityLabel } from "@/lib/couponValidity";
-import { couponDiscountAmount, couponDiscountLabel, couponDiscountFields } from "@/lib/couponDiscount";
+import { couponDiscountAmount, couponDiscountLabel } from "@/lib/couponDiscount";
 import MyCoupons from "@/components/MyCoupons";
 
 export default function BuyPackagesPage() {
