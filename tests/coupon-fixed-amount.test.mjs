@@ -26,3 +26,8 @@ test("invalid or unsafe discount definitions are rejected", () => {
   assert.throws(() => couponDiscountFields({ discountRate: 1.2 }));
   assert.throws(() => couponDiscountFields({ discountType: "unknown", discountRate: 0.8 }));
 });
+
+test("malformed legacy coupon labels show warning without giving discount", () => {
+  assert.equal(couponDiscountLabel({ discountRate: "0.85" }), "折扣設定待核對");
+  assert.throws(() => couponDiscountAmount(1000, { discountRate: "0.85" }));
+});
