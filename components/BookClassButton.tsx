@@ -16,6 +16,7 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { bookClass } from "@/lib/bookingService";
+import { isPastNormalCancellationDeadline } from "@/lib/bookingCancellationNotice";
 import TrialVoucherChoice from "@/components/TrialVoucherChoice";
 import {
   cancelWaitlist,
@@ -900,6 +901,19 @@ if (alreadyBooked) {
             <p className="mt-2 text-slate-600">
               {courseName}
             </p>
+
+            {/* 逾一般取消期限只提醒，不阻止預約；月約逐堂判斷。 */}
+            {(
+              bookingMode === "single"
+                ? isPastNormalCancellationDeadline(startTime.toDate())
+                : selectedClasses.some(item => isPastNormalCancellationDeadline(item.startTime.toDate()))
+            ) && (
+              <div role="alert" className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+                <p className="font-bold">提醒：你選擇的課程中有已超過一般取消期限的堂次</p>
+                <p className="mt-1">一般取消最晚須在上課前一天 23:59 前完成。這些堂次仍然可以預約，但預約成功後不能依一般取消規則退點。符合特殊請假條件者，仍依原規則處理。</p>
+                <p className="mt-1 font-semibold">請確認可以出席，再按「確認預約」。</p>
+              </div>
+            )}
 
             {/* 預約方式 */}
             {relatedClasses.length > 1 && (
