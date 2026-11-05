@@ -194,10 +194,11 @@ setBirthdayDay(
         );
 
         // 讀取學生已經兌換、目前可使用的紅利優惠券
+        // 與「我的優惠券」使用一致的會員查詢，再由前端篩選可用狀態。
+        // 後端購買 API 仍會重新驗證所有權、期限與折扣。
         const userCouponsQuery = query(
           collection(db, "userCoupons"),
-          where("userId", "==", user.uid),
-          where("status", "==", "available")
+          where("userId", "==", user.uid)
         );
 
         unsubscribeUserCoupons = onSnapshot(
