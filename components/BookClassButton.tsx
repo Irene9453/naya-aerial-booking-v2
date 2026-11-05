@@ -594,6 +594,18 @@ setShowConfirmation(true);
     );
   }
 
+  // 上課當天台灣時間 00:00 起，已超過前一天 23:59 的一般取消期限。
+  function isPastNormalCancellationDeadline(timestamp: Timestamp): boolean {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit",
+    }).formatToParts(timestamp.toDate());
+    const year = Number(parts.find(part => part.type === "year")?.value);
+    const month = Number(parts.find(part => part.type === "month")?.value);
+    const day = Number(parts.find(part => part.type === "day")?.value);
+    const startOfClassDayTaipei = Date.UTC(year, month - 1, day - 1, 16, 0, 0);
+    return Date.now() >= startOfClassDayTaipei;
+  }
+
   const selectedClasses =
     relatedClasses.filter(
       (classItem) =>
@@ -900,6 +912,19 @@ if (alreadyBooked) {
             <p className="mt-2 text-slate-600">
               {courseName}
             </p>
+
+            {/* 逾一般取消期限只提醒，不阻止預約；月約逐堂判斷。 */}
+            {(
+              bookingMode === "single"
+                ? isPastNormalCancellationDeadline(startTime)
+                : selectedClasses.some(item => isPastNormalCancellationDeadline(item.startTime))
+            ) && (
+              <div role="alert" className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+                <p className="font-bold">提醒：你選擇的課程中有已超過一般取消期限的堂次</p>
+                <p className="mt-1">一般取消最晚須在上課前一天 23:59 前完成。這些堂次仍然可以預約，但預約成功後不能依一般取消規則退點。符合特殊請假條件者，仍依原規則處理。</p>
+                <p className="mt-1 font-semibold">請確認可以出席，再按「確認預約」。</p>
+              </div>
+            )}
 
             {/* 預約方式 */}
             {relatedClasses.length > 1 && (
