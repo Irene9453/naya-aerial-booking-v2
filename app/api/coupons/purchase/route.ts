@@ -4,6 +4,7 @@ import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 import { couponApiUser, couponApiFailure, CouponApiError, safeCouponId } from "@/lib/couponApiAuth";
 import { couponIsUsable, couponDeadline } from "@/lib/couponValidity";
 import { couponTemplateFields } from "@/lib/couponTemplate";
+import { couponDiscountFields, couponDiscountAmount } from "@/lib/couponDiscount";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -58,13 +59,13 @@ export async function POST(request: NextRequest) {
       if (!coupon || coupon.userId !== uid || !couponIsUsable(coupon, now)) throw new CouponApiError("優惠券已到期、待核對、已使用或已被其他申請保留。");
       if (!product || product.isActive !== true || !Number.isSafeInteger(product.points) || product.points <= 0 || !Number.isSafeInteger(product.price) || product.price < 0) throw new CouponApiError("課卡商品不存在或已停用。");
       try { couponTemplateFields(coupon); } catch { throw new CouponApiError("優惠券折扣或適用商品設定無效。"); }
-      const rate = coupon.discountRate;
-      if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0 || rate > 1 || product.points < Number(coupon.minimumPackagePoints ?? 0) ||
+      if (product.points < Number(coupon.minimumPackagePoints ?? 0) ||
           (coupon.maximumPackagePoints != null && product.points > Number(coupon.maximumPackagePoints))) throw new CouponApiError("優惠券不適用於此商品。");
-      const discountAmount = Math.round(product.price * (1 - rate));
+      const discount = couponDiscountFields(coupon);
+      const discountAmount = couponDiscountAmount(product.price, coupon);
       const order = { userId: uid, offerType: "reserved_coupon", packageId: input.packageId, packageName: product.name, packagePoints: product.points,
         originalPrice: product.price, discountAmount, finalPrice: product.price - discountAmount, couponId: canonicalCouponId,
-        couponCode: birthday ? input.couponId : canonicalCouponId, couponName: String(coupon.name ?? "優惠券"), couponSource: birthdayUsageRef ? "birthday" : "user_coupon", discountType: "percentage", discountValue: rate,
+        couponCode: birthday ? input.couponId : canonicalCouponId, couponName: String(coupon.name ?? "優惠券"), couponSource: birthdayUsageRef ? "birthday" : "user_coupon", discountType: discount.discountType, discountValue: discount.discountType === "fixed_amount" ? discount.fixedDiscountAmount : discount.discountRate,
         couponExpiresAtMillis: couponDeadline(coupon) ?? null, couponReservedAtMillis: now,
         paymentMethod: input.paymentMethod, transferLastFive: input.paymentMethod === "transfer" ? input.transferLastFive : null,
         status: "pending", paymentStatus: "unpaid", createdAt: FieldValue.serverTimestamp(), submittedAtMillis: now,
