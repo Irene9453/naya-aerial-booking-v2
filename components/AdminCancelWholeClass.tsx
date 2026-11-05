@@ -30,7 +30,7 @@ export default function AdminCancelWholeClass({
   function handleCancel() {
     setMessage("");
 
-    if (!hasValidStartTime || startTimeMillis <= Date.now()) {
+    if (!hasValidStartTime || startTimeMillis === null || startTimeMillis <= Date.now()) {
       setMessage("課程已開始或時間未設定，不能整堂取消。");
       return;
     }
