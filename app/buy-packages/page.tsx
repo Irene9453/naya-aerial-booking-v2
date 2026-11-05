@@ -43,7 +43,7 @@ type AvailableCoupon = {
 };
 
 import { couponIsUsable, couponValidityLabel } from "@/lib/couponValidity";
-import { couponDiscountAmount, couponDiscountLabel } from "@/lib/couponDiscount";
+import { couponDiscountAmount, couponDiscountLabel, couponDiscountFields } from "@/lib/couponDiscount";
 import MyCoupons from "@/components/MyCoupons";
 
 export default function BuyPackagesPage() {
@@ -204,7 +204,13 @@ setBirthdayDay(
           userCouponsQuery,
           (snapshot) => {
             const nextCoupons =
-              snapshot.docs.filter(couponDocument => couponDocument.data().source !== "automatic_birthday" && couponIsUsable(couponDocument.data())).map((couponDocument) => {
+              snapshot.docs.filter((couponDocument) => {
+                const coupon = couponDocument.data();
+                if (coupon.source === "automatic_birthday" || !couponIsUsable(coupon)) return false;
+                // 異常舊券不可讓結帳畫面崩潰；後端仍獨立驗證。
+                try { couponDiscountFields(coupon); return true; }
+                catch { return false; }
+              }).map((couponDocument) => {
                 const data = couponDocument.data();
 
                 return {
