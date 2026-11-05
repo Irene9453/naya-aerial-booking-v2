@@ -189,17 +189,23 @@ setBirthdayDay(
         );
 
         // 讀取學生已經兌換、目前可使用的紅利優惠券
+        // 使用與「我的優惠券」相同的會員查詢，避免雙條件索引造成結帳清單讀取失敗。
+        // 可用狀態及期限仍由 couponIsUsable() 驗證，後端下單時會再驗證一次。
         const userCouponsQuery = query(
           collection(db, "userCoupons"),
-          where("userId", "==", user.uid),
-          where("status", "==", "available")
+          where("userId", "==", user.uid)
         );
 
         unsubscribeUserCoupons = onSnapshot(
           userCouponsQuery,
           (snapshot) => {
             const nextCoupons =
-              snapshot.docs.filter(couponDocument => couponDocument.data().source !== "automatic_birthday" && couponIsUsable(couponDocument.data())).map((couponDocument) => {
+              snapshot.docs
+                .filter((couponDocument) => {
+                  const coupon = couponDocument.data();
+                  return coupon.source !== "automatic_birthday" && couponIsUsable(coupon);
+                })
+                .map((couponDocument) => {
                 const data = couponDocument.data();
 
                 return {
