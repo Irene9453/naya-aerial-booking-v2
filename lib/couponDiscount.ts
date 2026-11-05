@@ -31,8 +31,13 @@ export function couponDiscountAmount(price: number, coupon: Record<string, unkno
 }
 
 export function couponDiscountLabel(coupon: Record<string, unknown>): string {
-  const discount = couponDiscountFields(coupon);
-  return discount.discountType === "fixed_amount"
-    ? `折抵 NT$ ${discount.fixedDiscountAmount.toLocaleString("en-US")}`
-    : `${Number((discount.discountRate * 10).toFixed(2))} 折`;
+  try {
+    const discount = couponDiscountFields(coupon);
+    return discount.discountType === "fixed_amount"
+      ? `折抵 NT$ ${discount.fixedDiscountAmount.toLocaleString("en-US")}`
+      : `${Number((discount.discountRate * 10).toFixed(2))} 折`;
+  } catch {
+    // 舊資料若折扣欄位不完整，顯示待核對但不可在結帳使用。
+    return "折扣設定待核對";
+  }
 }
