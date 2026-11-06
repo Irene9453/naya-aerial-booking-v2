@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { getTrialClassKind } from "@/lib/trialVoucherBooking";
 
@@ -31,14 +31,16 @@ export default function TrialVoucherChoice({ userId, courseName, courseCategory,
     }
     setLoading(true);
     setFailed(false);
-    const q = query(collection(db, "trialVouchers"), where("userId", "==", userId));
-    // Do not put arbitrary userId in a public URL. Firestore rules must enforce owner-only reads.
-    return onSnapshot(q, (snap) => {
-      const options = snap.docs.filter((doc) => {
-        const data = doc.data();
-        return data.userId === userId && data.kind === kind && data.status === "available" && data.quantity === 1;
-      }).map((doc) => ({ id: doc.id, kind })) as TrialVoucherOption[];
-      setVouchers(options);
+    // Voucher IDs are deterministic. Read the exact owned document rather than a collection query.
+    // This uses the deployed Firestore `get` rule and needs no query or composite index.
+    const offerId = kind === "yoga" ? "trial_yoga" : "trial_aerial";
+    const voucherId = `new_student_${userId}_${offerId}`;
+    return onSnapshot(doc(db, "trialVouchers", voucherId), (snap) => {
+      const data = snap.data();
+      const valid = snap.exists() && data?.userId === userId &&
+        data.offerId === offerId && data.kind === kind &&
+        data.status === "available" && data.quantity === 1 && data.bookingId == null;
+      setVouchers(valid ? [{ id: voucherId, kind }] : []);
       setLoading(false);
       setFailed(false);
     }, () => {
