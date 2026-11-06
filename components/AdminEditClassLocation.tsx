@@ -56,7 +56,7 @@ export default function AdminEditClassLocation({
 
   if (!isEditing) {
     return (
-      <div className="mt-3 flex flex-wrap items-center gap-3">
+      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="text-sm text-slate-600">
           📍 {location || "地點待確認"}
         </span>
@@ -68,9 +68,9 @@ export default function AdminEditClassLocation({
             setMessage("");
             setIsEditing(true);
           }}
-          className="rounded-lg border border-sky-200 px-3 py-1.5 text-sm font-semibold text-sky-700 hover:bg-sky-50"
+          className="rounded-md px-2 py-1 text-xs font-semibold text-sky-700 underline-offset-2 hover:bg-sky-50 hover:underline"
         >
-          修改地點
+          修改
         </button>
 
         {message && (
