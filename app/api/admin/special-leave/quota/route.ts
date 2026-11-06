@@ -59,6 +59,11 @@ export async function POST(request: NextRequest) {
         manualBlocked, extraRemaining, modifiedBy: adminId, reason,
         modifiedAt: FieldValue.serverTimestamp(), operationId,
       });
+      // Mirror only the quota view into the existing owner-readable member document.
+      // Firestore security rules remain unchanged; the adjustment itself is backend-only.
+      tx.update(memberRef, {
+        [`specialLeaveQuotaAdjustments.${periodKey}`]: { manualBlocked, extraRemaining },
+      });
       tx.create(logRef, {
         userId, adminId, periodKey, action, reason, baselineUsed,
         previousState: existing ? { manualBlocked: existing.manualBlocked === true, extraRemaining: previousExtra } : null,
