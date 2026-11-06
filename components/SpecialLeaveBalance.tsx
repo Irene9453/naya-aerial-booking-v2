@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   collection,
+  doc,
   onSnapshot,
   query,
   Timestamp,
@@ -68,6 +69,7 @@ export default function SpecialLeaveBalance({
 
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [quotaAdjustment, setQuotaAdjustment] = useState({ manualBlocked: false, extraRemaining: 0 });
 
   const currentPeriod = getCurrentPeriod();
 
@@ -116,7 +118,21 @@ export default function SpecialLeaveBalance({
     return unsubscribe;
   }, [userId, currentPeriod.periodKey]);
 
+  // This mirror lives in the existing member profile; no new client Firestore permissions required.
+  useEffect(() => {
+    if (!userId) return;
+    return onSnapshot(doc(db, "users", userId), (snapshot) => {
+      const raw = snapshot.data()?.specialLeaveQuotaAdjustments?.[currentPeriod.periodKey];
+      setQuotaAdjustment({
+        manualBlocked: raw?.manualBlocked === true,
+        extraRemaining: raw?.extraRemaining === 1 ? 1 : 0,
+      });
+    }, () => setMessage("讀取特殊請假調整額度失敗。"));
+  }, [userId, currentPeriod.periodKey]);
+
   const hasUsedLeave = leaveRecord !== null;
+  const canUseLeave = !quotaAdjustment.manualBlocked &&
+    (!hasUsedLeave || quotaAdjustment.extraRemaining > 0);
 
   return (
     <article className="rounded-3xl bg-white p-7 shadow-sm">
@@ -138,12 +154,12 @@ export default function SpecialLeaveBalance({
         {!isLoading && (
           <span
             className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-              hasUsedLeave
+              !canUseLeave
                 ? "bg-slate-100 text-slate-600"
                 : "bg-emerald-50 text-emerald-700"
             }`}
           >
-            {hasUsedLeave ? "本期已使用" : "尚未使用"}
+            {canUseLeave ? "尚可使用" : "本期已使用"}
           </span>
         )}
       </div>
@@ -166,12 +182,12 @@ export default function SpecialLeaveBalance({
             <div className="mt-2 flex items-end gap-2">
               <span
                 className={`text-4xl font-bold ${
-                  hasUsedLeave
+                  !canUseLeave
                     ? "text-slate-400"
                     : "text-sky-600"
                 }`}
               >
-                {hasUsedLeave ? 0 : 1}
+                {canUseLeave ? 1 : 0}
               </span>
 
               <span className="pb-1 text-slate-500">
@@ -201,7 +217,7 @@ export default function SpecialLeaveBalance({
             </div>
           )}
 
-          {!hasUsedLeave && (
+          {canUseLeave && (
             <p className="mt-4 text-sm leading-6 text-slate-500">
               每半年提供 1 次特殊請假額度。超過一般取消期限後，如遇突發身體不適，可於符合條件的課程使用。
             </p>

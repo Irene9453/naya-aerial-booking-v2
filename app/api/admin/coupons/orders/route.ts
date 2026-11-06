@@ -42,8 +42,14 @@ export async function POST(request: NextRequest) {
         return { requestId: input.requestId, rejected: true };
       }
       if (!member || sale.exists || !Number.isSafeInteger(member.points) || member.points < 0 || !Number.isSafeInteger(order.packagePoints) || order.packagePoints <= 0 ||
-          typeof order.discountValue !== "number" || order.discountValue <= 0 || order.discountValue > 1 || !Number.isSafeInteger(order.originalPrice) || order.originalPrice < 0 ||
-          order.discountAmount !== Math.round(order.originalPrice * (1 - order.discountValue)) || order.finalPrice !== order.originalPrice - order.discountAmount ||
+          !Number.isSafeInteger(order.originalPrice) || order.originalPrice < 0 ||
+          !(order.discountType === "fixed_amount"
+            ? Number.isSafeInteger(order.discountValue) && order.discountValue > 0 && order.discountValue <= 1000000 &&
+              order.discountAmount === Math.min(order.originalPrice, order.discountValue)
+            : (order.discountType === "percentage" || order.discountType == null) &&
+              typeof order.discountValue === "number" && order.discountValue > 0 && order.discountValue <= 1 &&
+              order.discountAmount === Math.round(order.originalPrice * (1 - order.discountValue))) ||
+          order.finalPrice !== order.originalPrice - order.discountAmount ||
           !Number.isSafeInteger(order.couponReservedAtMillis) || order.couponReservedAtMillis !== coupon.reservedAtMillis ||
           (order.couponExpiresAtMillis !== null && (!Number.isSafeInteger(order.couponExpiresAtMillis) || order.couponReservedAtMillis >= order.couponExpiresAtMillis))) throw new CouponApiError("訂單價格或保留優惠資料不正確。");
       const newPointBalance = member.points + order.packagePoints;
