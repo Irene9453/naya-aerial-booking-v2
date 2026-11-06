@@ -7,6 +7,7 @@ import {
 import { auth, db } from "@/lib/firebase";
 
 import { issueCouponValidity } from "@/lib/couponValidity";
+import { couponDiscountLabel } from "@/lib/couponDiscount";
 
 type CouponType = "new_student" | "birthday" | "reward";
 
@@ -15,6 +16,8 @@ type Coupon = {
   name: string;
   type: CouponType;
   discountRate: number;
+  discountType?: "percentage" | "fixed_amount";
+  fixedDiscountAmount?: number;
   rewardCost: number;
   minimumPackagePoints: number;
   maximumPackagePoints: number | null;
@@ -31,6 +34,8 @@ const blank = {
   name: "",
   type: "reward" as CouponType,
   percent: "90",
+  discountType: "percentage",
+  fixedAmount: "100",
   rewardCost: "27",
   min: "0",
   max: "",
@@ -83,6 +88,8 @@ export default function AdminCouponManager() {
       name: item.name ?? "",
       type: item.type ?? "reward",
       percent: String((item.discountRate ?? 1) * 100),
+      discountType: item.discountType ?? "percentage",
+      fixedAmount: String(item.fixedDiscountAmount ?? 100),
       rewardCost: String(item.rewardCost ?? 0),
       min: String(item.minimumPackagePoints ?? 0),
       max: item.maximumPackagePoints == null
@@ -103,14 +110,17 @@ export default function AdminCouponManager() {
     if (!user) return setMessage("請先登入管理員帳號。");
 
     const percent = Number(form.percent);
+    const fixedAmount = Number(form.fixedAmount);
     const cost = Number(form.rewardCost);
     const min = Number(form.min);
     const max = form.max.trim() === "" ? null : Number(form.max);
     const order = Number(form.order);
 
     if (!form.name.trim()) return setMessage("請填寫優惠券名稱。");
-    if (!Number.isFinite(percent) || percent <= 0 || percent > 100)
+    if (form.discountType === "percentage" && (!Number.isFinite(percent) || percent <= 0 || percent > 100))
       return setMessage("應付比例必須大於 0 且不超過 100%。");
+    if (form.discountType === "fixed_amount" && (!Number.isSafeInteger(fixedAmount) || fixedAmount <= 0 || fixedAmount > 1000000))
+      return setMessage("固定折抵金額必須為 1～1,000,000 元的整數。");
     if (!Number.isSafeInteger(cost) || cost < 0 ||
         (form.type === "reward" && cost <= 0))
       return setMessage("紅利兌換券必須設定大於 0 的整數點數。");
@@ -130,7 +140,9 @@ export default function AdminCouponManager() {
       const data = {
         name: form.name.trim(),
         type: form.type,
-        discountRate: percent / 100,
+        discountType: form.discountType,
+        discountRate: form.discountType === "percentage" ? percent / 100 : 1,
+        fixedDiscountAmount: form.discountType === "fixed_amount" ? fixedAmount : 0,
         rewardCost: form.type === "reward" ? cost : 0,
         minimumPackagePoints: min,
         maximumPackagePoints: max,
@@ -219,7 +231,7 @@ export default function AdminCouponManager() {
               </span>
             </div>
             <p className="mt-3 text-2xl font-bold text-sky-700">
-              {Number(((item.discountRate ?? 1) * 10).toFixed(2))} 折優惠
+              {couponDiscountLabel(item)}
             </p>
             <p className="mt-2 text-sm text-slate-600">
               類型：{item.type === "reward" ? "紅利兌換"
@@ -255,7 +267,7 @@ export default function AdminCouponManager() {
               {editing ? "編輯優惠券" : "新增優惠券"}
             </h3>
             <p className="mt-2 text-sm text-slate-500">
-              例如輸入 85，代表會員支付原價的 85%（8.5 折）。
+              可選擇百分比折扣（例如 85%＝8.5 折）或固定金額折抵（例如 NT$100、NT$200）。
             </p>
 
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -273,11 +285,26 @@ export default function AdminCouponManager() {
                 </select>
               </label>
 
-              <label>應付比例（%）
-                <input type="number" className={inputClass}
-                  value={form.percent}
-                  onChange={(e) => change("percent", e.target.value)} />
+              <label>折扣方式
+                <select className={inputClass} value={form.discountType}
+                  onChange={(e) => change("discountType", e.target.value)}>
+                  <option value="percentage">百分比折扣</option>
+                  <option value="fixed_amount">固定金額折抵</option>
+                </select>
               </label>
+              {form.discountType === "percentage" ? (
+                <label>應付比例（%）
+                  <input type="number" min="1" max="100" className={inputClass}
+                    value={form.percent}
+                    onChange={(e) => change("percent", e.target.value)} />
+                </label>
+              ) : (
+                <label>固定折抵（NT$）
+                  <input type="number" min="1" max="1000000" step="1" className={inputClass}
+                    value={form.fixedAmount}
+                    onChange={(e) => change("fixedAmount", e.target.value)} />
+                </label>
+              )}
 
               <label>紅利兌換點數
                 <input type="number" className={inputClass}

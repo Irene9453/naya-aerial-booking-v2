@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, onSnapshot } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+import { couponDiscountLabel } from "@/lib/couponDiscount";
 
 type Member = { id: string; name: string; phone: string; email: string; role: string };
-type Coupon = { expiryMode?: string; expiryDate?: string; validDays?: number; id: string; name: string; isActive: boolean; discountRate: number };
+type Coupon = { expiryMode?: string; expiryDate?: string; validDays?: number; id: string; name: string; isActive: boolean; discountRate: number; discountType?: "percentage" | "fixed_amount"; fixedDiscountAmount?: number };
 type Result = { userId: string; status: "created" | "already_done" | "failed"; error?: string };
 
 export default function AdminCouponGiftManager() {
@@ -28,7 +29,7 @@ export default function AdminCouponGiftManager() {
     }, () => setMessage("會員讀取失敗。"));
     const stopCoupons = onSnapshot(collection(db, "coupons"), snap => {
       setCoupons(snap.docs.map(d => ({ expiryMode: String(d.data().expiryMode ?? "unlimited"), expiryDate: String(d.data().expiryDate ?? ""), validDays: Number(d.data().validDays ?? 0), id: d.id, name: String(d.data().name ?? ""),
-        isActive: d.data().isActive === true, discountRate: Number(d.data().discountRate ?? 1) })));
+        isActive: d.data().isActive === true, discountRate: Number(d.data().discountRate ?? 1), discountType: d.data().discountType === "fixed_amount" ? "fixed_amount" as const : "percentage" as const, fixedDiscountAmount: Number(d.data().fixedDiscountAmount ?? 0) })));
     }, () => setMessage("優惠券讀取失敗。"));
     return () => { stopMembers(); stopCoupons(); };
   }, []);
@@ -77,7 +78,7 @@ export default function AdminCouponGiftManager() {
     <p className="mt-2 text-sm text-slate-600">可發給單人或多位會員。確認後會實際發券，每次發放均保留原因與紀錄。</p>
     <div className="mt-5 grid gap-4 md:grid-cols-2">
       <label>優惠券<select disabled={busy} className="mt-1 w-full rounded-xl border p-3" value={couponId} onChange={e => setCouponId(e.target.value)}>
-        <option value="">請選擇</option>{activeCoupons.map(c => <option key={c.id} value={c.id}>{c.name}（{Number((c.discountRate * 10).toFixed(2))} 折）</option>)}
+        <option value="">請選擇</option>{activeCoupons.map(c => <option key={c.id} value={c.id}>{c.name}（{couponDiscountLabel(c)}）</option>)}
       </select></label>
       <label>每人張數（1～10）<input disabled={busy} type="number" min={1} max={10} className="mt-1 w-full rounded-xl border p-3" value={quantity} onChange={e => setQuantity(Number(e.target.value))} /></label>
       <label className="md:col-span-2">贈送原因<textarea maxLength={200} disabled={busy} className="mt-1 w-full rounded-xl border p-3" rows={2} value={reason} onChange={e => setReason(e.target.value)} placeholder="例如：開幕感謝禮" /></label>

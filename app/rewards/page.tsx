@@ -16,11 +16,14 @@ import { auth, db } from "@/lib/firebase";
 import { redeemCoupon } from "@/lib/redeemCouponService";
 
 import { couponValidityLabel, couponIsUsable, couponDeadline, templateValidityLabel, templateCanIssue } from "@/lib/couponValidity";
+import { couponDiscountLabel, couponDiscountFields } from "@/lib/couponDiscount";
 
 type RewardCouponData = {
   id: string;
   name: string;
   discountRate: number;
+  discountType?: "percentage" | "fixed_amount";
+  fixedDiscountAmount?: number;
   rewardCost: number;
   expiryMode?: string;
   expiryDate?: string;
@@ -36,14 +39,18 @@ type UserCouponData = {
   couponId: string;
   name: string;
   discountRate: number;
+  discountType?: "percentage" | "fixed_amount";
+  fixedDiscountAmount?: number;
   status: string;
   source?: string;
   expiryMode?: string;
   expiresAtMillis?: number | null;
 };
 
-function formatDiscount(discountRate: number) {
-  return `${Number((discountRate * 10).toFixed(2))} 折`;
+function isCouponTemplateRedeemable(coupon: RewardCouponData): boolean {
+  if (!templateCanIssue(coupon)) return false;
+  try { couponDiscountFields(coupon); return true; }
+  catch { return false; }
 }
 
 export default function RewardsPage() {
@@ -115,6 +122,8 @@ export default function RewardsPage() {
           id: couponDocument.id,
           name: String(data.name ?? ""),
           discountRate: Number(data.discountRate ?? 1),
+          discountType: data.discountType === "fixed_amount" ? "fixed_amount" as const : "percentage" as const,
+          fixedDiscountAmount: Number(data.fixedDiscountAmount ?? 0),
           rewardCost: Number(data.rewardCost ?? 0),
           expiryMode: String(data.expiryMode ?? "unlimited"), expiryDate: String(data.expiryDate ?? ""), validDays: Number(data.validDays ?? 0),
           description: String(data.description ?? ""),
@@ -157,9 +166,9 @@ export default function RewardsPage() {
                     data.couponId ?? ""
                   ),
                   name: String(data.name ?? ""),
-                  discountRate: Number(
-                    data.discountRate ?? 1
-                  ),
+                  discountRate: Number(data.discountRate ?? 1),
+                  discountType: data.discountType === "fixed_amount" ? "fixed_amount" as const : "percentage" as const,
+                  fixedDiscountAmount: Number(data.fixedDiscountAmount ?? 0),
                   source: String(data.source ?? ""),
                   expiryMode: data.expiryMode,
                   expiresAtMillis: data.expiresAtMillis,
@@ -188,7 +197,7 @@ export default function RewardsPage() {
 
   const nextCoupon = useMemo(() => {
     return coupons.find(
-      (coupon) => coupon.rewardCost > rewardPoints && templateCanIssue(coupon)
+      (coupon) => coupon.rewardCost > rewardPoints && isCouponTemplateRedeemable(coupon)
     );
   }, [coupons, rewardPoints]);
 
@@ -304,7 +313,7 @@ export default function RewardsPage() {
 
           <div className="mt-7 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
             {coupons.map((coupon) => {
-              const templateAvailable = templateCanIssue(coupon);
+              const templateAvailable = isCouponTemplateRedeemable(coupon);
               const canRedeem =
                 rewardPoints >= coupon.rewardCost && templateAvailable;
 
@@ -335,9 +344,7 @@ export default function RewardsPage() {
                     </p>
 
                     <p className="mt-1 text-3xl font-bold text-sky-700">
-                      {formatDiscount(
-                        coupon.discountRate
-                      )}
+                      {couponDiscountLabel(coupon)}
                     </p>
 
                     <p className="mt-4 text-sm text-slate-500">
@@ -359,7 +366,7 @@ export default function RewardsPage() {
                   >
                     {isRedeeming
                       ? "兌換中……"
-                      : !templateAvailable ? "已到期或期限待確認" : canRedeem
+                      : !templateAvailable ? "折扣或期限待核對" : canRedeem
                         ? "立即兌換"
                         : `還差 ${
                             coupon.rewardCost -
@@ -400,9 +407,7 @@ export default function RewardsPage() {
                       <p className="mt-2 text-sm text-slate-700">{couponValidityLabel(coupon)}</p>
 
                       <p className="mt-2 text-2xl font-bold text-sky-700">
-                        {formatDiscount(
-                          coupon.discountRate
-                        )}
+                        {couponDiscountLabel(coupon)}
                       </p>
                     </div>
 
