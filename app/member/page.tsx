@@ -36,6 +36,7 @@ type MemberData = {
   experience: string;
   points: number;
   newStudentOfferPurchases: { trial_yoga?: boolean; trial_aerial?: boolean };
+  specialLeaveOverrides: Record<string, { status?: string }>;
   role: "student" | "admin";
    legacyStatus:
     | "eligible"
@@ -250,6 +251,7 @@ setMember({
     trial_yoga: data.newStudentOfferPurchases?.trial_yoga === true,
     trial_aerial: data.newStudentOfferPurchases?.trial_aerial === true,
   },
+  specialLeaveOverrides: data.specialLeaveOverrides && typeof data.specialLeaveOverrides === "object" ? data.specialLeaveOverrides : {},
   role: data.role === "admin" ? "admin" : "student",
 
   legacyStatus:
@@ -651,7 +653,7 @@ const historyBookings = bookings
               {/* 特殊請假額度 */}
         {userId && (
           <div className="mt-8">
-            <SpecialLeaveBalance userId={userId} />
+            <SpecialLeaveBalance userId={userId} overrides={member.specialLeaveOverrides} />
           </div>
         )}
 

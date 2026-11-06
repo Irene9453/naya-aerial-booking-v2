@@ -192,15 +192,31 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        if (
-          specialLeaveSnap.exists &&
-          specialLeaveSnap.data()?.status === "approved"
-        ) {
+        const override = userData.specialLeaveOverrides?.[periodKey];
+        const validRevision = Number.isSafeInteger(override?.revision) && override.revision > 0;
+        const manuallyAvailable = override?.status === "available" && validRevision;
+        const originallyUsed = specialLeaveSnap.exists &&
+          specialLeaveSnap.data()?.status === "approved";
+
+        if (override?.status === "blocked" || (originallyUsed && !manuallyAvailable)) {
           throw new Error(
             `你已使用 ${periodYear} 年${
               periodHalf === 1 ? "上半年" : "下半年"
             }的特殊請假額度。`
           );
+        }
+
+        // A restored quota is recorded separately, preserving all original
+        // refunds and historical special leave records for auditing.
+        const restoredLeaveRef = originallyUsed && manuallyAvailable
+          ? adminDb.collection("specialLeaveRecords")
+              .doc(`${userId}_${periodKey}_manual_${override.revision}`)
+          : null;
+        const restoredLeaveSnap = restoredLeaveRef
+          ? await tx.get(restoredLeaveRef)
+          : null;
+        if (restoredLeaveSnap?.exists) {
+          throw new Error("此筆恢復額度已使用，請重新整理。");
         }
 
         if (
@@ -290,12 +306,18 @@ export async function POST(request: NextRequest) {
           userData.name ?? ""
         );
 
-        // 退還點數
+        // 退還點數或體驗券；手動額度也在同一個 transaction 內消耗。
+        const memberUpdates: Record<string, unknown> = {};
         if (voucherRef) {
           tx.update(voucherRef, { status: "available", quantity: 1, bookingId: null, usedAt: null, refundedAt: FieldValue.serverTimestamp() });
         } else {
-          tx.update(userRef, { points: newPointBalance });
+          memberUpdates.points = newPointBalance;
         }
+        if (manuallyAvailable) {
+          memberUpdates[`specialLeaveOverrides.${periodKey}.status`] = "consumed";
+          memberUpdates[`specialLeaveOverrides.${periodKey}.consumedAt`] = FieldValue.serverTimestamp();
+        }
+        if (Object.keys(memberUpdates).length > 0) tx.update(userRef, memberUpdates);
 
         // 釋出課程名額
         tx.update(classRef, {
@@ -312,7 +334,7 @@ export async function POST(request: NextRequest) {
         });
 
         // 半年一次的特殊請假紀錄
-        tx.set(specialLeaveRef, {
+        tx.set(restoredLeaveRef ?? specialLeaveRef, {
           userId,
           studentName,
           bookingId,
@@ -323,6 +345,7 @@ export async function POST(request: NextRequest) {
           periodHalf,
           periodKey,
           reason: "特殊請假",
+          manualQuotaRevision: restoredLeaveRef ? override.revision : null,
           pointsRefunded: pointsUsed,
           bookedCountBefore: bookedCount,
           refunded: true,

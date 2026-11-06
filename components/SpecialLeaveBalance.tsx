@@ -12,6 +12,7 @@ import { db } from "@/lib/firebase";
 
 type SpecialLeaveBalanceProps = {
   userId: string;
+  overrides?: Record<string, { status?: string }>;
 };
 
 type LeaveRecord = {
@@ -62,6 +63,7 @@ function formatDate(timestamp: Timestamp | null) {
 
 export default function SpecialLeaveBalance({
   userId,
+  overrides = {},
 }: SpecialLeaveBalanceProps) {
   const [leaveRecord, setLeaveRecord] =
     useState<LeaveRecord | null>(null);
@@ -116,7 +118,9 @@ export default function SpecialLeaveBalance({
     return unsubscribe;
   }, [userId, currentPeriod.periodKey]);
 
-  const hasUsedLeave = leaveRecord !== null;
+  const manualStatus = overrides[currentPeriod.periodKey]?.status;
+  const hasUsedLeave = manualStatus === "available" ? false :
+    manualStatus === "blocked" || manualStatus === "consumed" ? true : leaveRecord !== null;
 
   return (
     <article className="rounded-3xl bg-white p-7 shadow-sm">
