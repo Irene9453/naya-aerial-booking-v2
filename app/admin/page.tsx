@@ -24,6 +24,7 @@ import AdminLegacyCouponAudit from "@/components/AdminLegacyCouponAudit";
 import AdminCouponGiftManager from "@/components/AdminCouponGiftManager";
 import AdminPurchaseRequests from "@/components/AdminPurchaseRequests";
 import AdminSpecialLeaveManager from "@/components/AdminSpecialLeaveManager";
+import AdminSpecialLeaveAdjustment from "@/components/AdminSpecialLeaveAdjustment";
 import MovementLibrary from "@/components/MovementLibrary";
 import {
   AdminLegacyMemberManager,
@@ -183,6 +184,7 @@ export default function AdminPage() {
   rewardPoints: Number(
     data.rewardPoints ?? 0
   ),
+  specialLeaveOverrides: data.specialLeaveOverrides && typeof data.specialLeaveOverrides === "object" ? data.specialLeaveOverrides : {},
 journeyLegacyClasses: Number(
   data.journeyLegacyClasses ?? 0
 ),
@@ -367,7 +369,7 @@ allowMonthlyBooking: Boolean(
 {/* 里程碑獎勵管理 */}
 <AdminSection title="里程碑獎勵管理"><AdminMilestoneRewards /></AdminSection>
 
-<AdminSection title="特殊請假管理"><AdminSpecialLeaveManager /></AdminSection>
+<AdminSection title="特殊請假管理"><div className="space-y-5 p-4 sm:p-5"><AdminSpecialLeaveAdjustment students={students} /><AdminSpecialLeaveManager /></div></AdminSection>
 <AdminSection title="動作資料庫"><MovementLibrary /></AdminSection>
 
 {/* 課卡管理 */}
