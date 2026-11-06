@@ -18,6 +18,7 @@ import AdminTodayClasses from "@/components/AdminTodayClasses";
 import AdminPackageManager from "@/components/AdminPackageManager";
 import StudentManager from "@/components/StudentManager";
 import ClassManager from "@/components/ClassManager";
+import AdminBookForStudent from "@/components/AdminBookForStudent";
 import AdminRevenueSummary from "@/components/AdminRevenueSummary";
 import AdminCouponManager from "@/components/AdminCouponManager";
 import AdminLegacyCouponAudit from "@/components/AdminLegacyCouponAudit";
@@ -358,6 +359,7 @@ allowMonthlyBooking: Boolean(
 <AdminSection title="購買申請"><AdminPurchaseRequests /></AdminSection>
 
 {/* 課程管理 */}
+<AdminSection title="老師代學生預約" description="選擇學生及課程，直接扣學生點數或體驗券，並加入預約名單"><AdminBookForStudent students={students} classes={classes} /></AdminSection>
 <AdminSection title="課程管理"><ClassManager classes={classes} /></AdminSection>
 
 {/* 舊會員移轉管理 */}
