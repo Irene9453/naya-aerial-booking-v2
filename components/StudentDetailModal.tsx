@@ -8,7 +8,7 @@ import {
   Timestamp,
   where,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import type { StudentData } from "@/components/StudentManager";
 import AddStudentLessonRecord from "@/components/AddStudentLessonRecord";
 import EditStudentLessonRecord from "@/components/EditStudentLessonRecord";
@@ -200,6 +200,41 @@ export default function StudentDetailModal({
     rewardTransactions,
     setRewardTransactions,
   ] = useState<RewardTransactionRecord[]>([]);
+
+  const [trialBalances, setTrialBalances] = useState<{ trialYoga: number; trialAerial: number; total: number } | null>(null);
+  const [trialBalanceError, setTrialBalanceError] = useState("");
+  const [trialBalanceLoading, setTrialBalanceLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setTrialBalances(null);
+    setTrialBalanceError("");
+    setTrialBalanceLoading(true);
+    const load = async () => {
+      try {
+        const current = auth.currentUser;
+        if (!current) throw new Error("請重新登入管理員。");
+        const response = await fetch("/api/admin/trial-vouchers/balances", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${await current.getIdToken()}`,
+          },
+          body: JSON.stringify({ studentId: student.id }),
+          cache: "no-store",
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "體驗券查詢失敗。");
+        if (!cancelled) setTrialBalances(result);
+      } catch (error) {
+        if (!cancelled) setTrialBalanceError(error instanceof Error ? error.message : "體驗券查詢失敗。");
+      } finally {
+        if (!cancelled) setTrialBalanceLoading(false);
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [student.id]);
 
   const [, setIsLoading] = useState(true);
 
@@ -629,7 +664,7 @@ const unsubscribeLessonRecords =
         </div>
 
         {/* 餘額摘要 */}
-        <div className="mt-7 grid gap-4 sm:grid-cols-2">
+        <div className="mt-7 grid gap-4 sm:grid-cols-3">
           <div className="rounded-2xl bg-sky-50 p-5">
             <p className="text-sm font-semibold text-sky-700">
               目前課程點數
@@ -641,6 +676,23 @@ const unsubscribeLessonRecords =
                 點
               </span>
             </p>
+          </div>
+
+          <div className="rounded-2xl bg-violet-50 p-5">
+            <p className="text-sm font-semibold text-violet-700">可用體驗券</p>
+            {trialBalanceLoading ? (
+              <p className="mt-3 text-sm text-violet-700">查詢中……</p>
+            ) : trialBalanceError ? (
+              <p className="mt-3 text-sm text-red-700" role="status">{trialBalanceError}</p>
+            ) : trialBalances ? (
+              <>
+                <p className="mt-2 text-4xl font-bold text-violet-700">{trialBalances.total}
+                  <span className="ml-2 text-base font-semibold">張</span>
+                </p>
+                <p className="mt-3 text-sm text-violet-800">空瑜：{trialBalances.trialYoga} 張</p>
+                <p className="mt-1 text-sm text-violet-800">舞綢／空環：{trialBalances.trialAerial} 張</p>
+              </>
+            ) : null}
           </div>
 
           <div className="rounded-2xl bg-amber-50 p-5">
