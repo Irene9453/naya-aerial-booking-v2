@@ -34,6 +34,8 @@ export default function ClassLessonContent({
   const [message, setMessage] =
     useState("");
 
+  const [isExpanded, setIsExpanded] = useState(false);
+
   useEffect(() => {
     const classRef = doc(
       db,
@@ -145,24 +147,19 @@ setMessage(
     savedContent.trim();
 
   return (
-    <div className="mt-5 rounded-2xl bg-slate-50 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-slate-800">
-            本堂上課內容
-          </p>
-
-          <p className="mt-1 text-xs text-slate-500">
-            可輸入動作編號，例如 A013、A027、A041
-          </p>
-        </div>
-
-        {savedContent && (
-          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-            已記錄
-          </span>
-        )}
-      </div>
+    <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+      <button type="button" aria-expanded={isExpanded} onClick={() => setIsExpanded((open) => !open)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-100">
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-slate-800">本堂上課內容</span>
+          {!isExpanded && savedContent && <span className="mt-1 block truncate text-xs text-slate-500">{savedContent}</span>}
+        </span>
+        <span className="flex shrink-0 items-center gap-2 text-xs font-semibold text-sky-700">
+          {savedContent && <span className="rounded-full bg-emerald-50 px-2 py-1 text-emerald-700">已記錄</span>}
+          {isExpanded ? "收合 ▲" : "展開 ▼"}
+        </span>
+      </button>
+      {isExpanded && <div className="border-t border-slate-200 px-4 pb-4 pt-3">
+        <p className="text-xs text-slate-500">輸入動作編號，例如 A013、A027、A041</p>
 
       <textarea
         value={content}
@@ -175,7 +172,7 @@ setMessage(
         }}
         rows={2}
         placeholder="例如：A013、A027、A041"
-        className="mt-4 w-full resize-y rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+        className="mt-3 w-full resize-y rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
       />
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -197,6 +194,7 @@ setMessage(
             : "儲存內容"}
         </button>
       </div>
+      </div>}
     </div>
   );
 }
