@@ -27,6 +27,7 @@ import { cleanupCurrentUserPushToken } from "@/lib/pushTokenCleanup";
 import SpecialLeaveBalance from "@/components/SpecialLeaveBalance";
 import MemberAerialJourney from "@/components/MemberAerialJourney";
 import LegacyMemberClaim from "@/components/LegacyMemberClaim";
+import MemberTrialVouchers from "@/components/MemberTrialVouchers";
 
 type MemberData = {
   name: string;
@@ -571,6 +572,7 @@ const historyBookings = bookings
             <p className="mt-3 text-5xl font-bold text-sky-600">
               {member.points}
             </p>
+            <MemberTrialVouchers userId={userId} />
 <div className="mt-6">
   <Link
     href="/buy-packages"
