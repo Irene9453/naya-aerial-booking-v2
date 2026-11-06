@@ -61,6 +61,14 @@ service cloud.firestore {
     }
 
 
+    // Trial vouchers: authenticated members may query only their own vouchers.
+    // All issuance, redemption and refunds are server-only (Admin SDK).
+    match /trialVouchers/{voucherId} {
+      allow get, list: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+      allow create, update, delete: if false;
+    }
+
     // =========================
     // 會員資料
     // =========================
