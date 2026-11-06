@@ -37,9 +37,9 @@ export async function POST(request: NextRequest) {
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(userId) ||
       !/^[a-zA-Z0-9_-]{8,100}$/.test(operationId) ||
       !ALLOWED.includes(target as Kind) ||
-      (action !== "grant" && action !== "exchange") ||
+      (action !== "grant" && action !== "exchange" && action !== "revoke") ||
       (action === "exchange" && (!ALLOWED.includes(previous as Kind) || previous === target)) ||
-      (action === "grant" && previous != null) ||
+      (action !== "exchange" && previous != null) ||
       reason.length < 2 || reason.length > 200) {
     return NextResponse.json({ error: "請選擇有效會員、券種與操作類型，並填寫 2–200 字原因。" }, { status: 400 });
   }
@@ -71,6 +71,37 @@ export async function POST(request: NextRequest) {
       if (!memberSnap.exists || memberSnap.data()?.role !== "student") {
         throw new Error("找不到有效學生會員。");
       }
+      if (action === "revoke") {
+        const voucher = newSnap.data();
+        if (!newSnap.exists || voucher?.userId !== userId ||
+            voucher.offerId !== target ||
+            voucher.kind !== (target === "trial_yoga" ? "yoga" : "aerial") ||
+            voucher.status !== "available" || voucher.quantity !== 1 ||
+            voucher.bookingId != null || voucher.usedAt != null ||
+            voucher.purchaseRequestId === undefined) {
+          throw new Error("這張體驗券不存在、已使用或已綁定預約，無法直接收回。");
+        }
+        tx.update(newRef, {
+          status: "revoked", quantity: 0,
+          revokedAt: FieldValue.serverTimestamp(),
+          revokedBy: adminId, revokeReason: reason,
+          revokeOperationId: operationId,
+        });
+        // Historical purchase/issue flags must remain intact.
+        // Member center and booking validation check actual voucher status.
+        tx.create(logRef, {
+          adminId, userId, action, offerId: target, previousOfferId: null,
+          reason, oldVoucherId: newRef.id, newVoucherId: null,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+        tx.create(adminDb.collection("notifications").doc(`trial_voucher_admin_${operationId}`), {
+          userId, type: "trial_voucher", title: "體驗券已收回",
+          body: `老師已收回「${label(target as Kind)}」。如有疑問請聯繫老師。`,
+          isRead: false, createdAt: FieldValue.serverTimestamp(),
+        });
+        return { alreadyDone: false, offerId: target };
+      }
+
       // Keep historical voucher IDs immutable: previously-used or revoked target vouchers
       // must never be reset, as it would allow the same benefit to be issued twice.
       if (newSnap.exists) {
@@ -122,6 +153,7 @@ export async function POST(request: NextRequest) {
       "操作識別碼已用於其他發券內容。",
       "學生曾領取此券種，無法重複發放或覆寫；請先人工核對。",
       "原體驗券已使用、預約中或不存在，無法換券。",
+      "這張體驗券不存在、已使用或已綁定預約，無法直接收回。",
     ];
     if (!safe.includes(message)) console.error("管理員體驗券操作失敗", error);
     return NextResponse.json({ error: safe.includes(message) ? message : "發券失敗，請稍後重試。" },

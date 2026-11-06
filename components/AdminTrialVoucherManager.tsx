@@ -17,7 +17,7 @@ function operationId() {
 export default function AdminTrialVoucherManager({ students }: { students: Student[] }) {
   const [search, setSearch] = useState("");
   const [userId, setUserId] = useState("");
-  const [action, setAction] = useState<"grant" | "exchange">("exchange");
+  const [action, setAction] = useState<"grant" | "exchange" | "revoke">("exchange");
   const [offerId, setOfferId] = useState<Offer>("trial_yoga");
   const [previousOfferId, setPreviousOfferId] = useState<Offer>("trial_aerial");
   const [reason, setReason] = useState("");
@@ -74,7 +74,7 @@ export default function AdminTrialVoucherManager({ students }: { students: Stude
   return (
     <div className="space-y-4 p-4 sm:p-5">
       <p className="text-sm leading-6 text-slate-600">
-        可手動發放單張體驗券，或在學生買錯券時將「尚未使用、未預約」的原券換成正確券種。
+        可手動發放、收回尚未使用的體驗券，或在學生買錯券時將「尚未使用、未預約」的原券換成正確券種。
         每種體驗券每位學生只允許一張，不覆寫已使用或已存在的體驗券。
       </p>
       <div className="grid gap-4 md:grid-cols-2">
@@ -99,14 +99,15 @@ export default function AdminTrialVoucherManager({ students }: { students: Stude
         </label>
         <label className="block text-sm font-semibold text-slate-700">
           操作類型
-          <select value={action} onChange={(e) => { setAction(e.target.value as "grant" | "exchange"); changeForm(); }}
+          <select value={action} onChange={(e) => { setAction(e.target.value as "grant" | "exchange" | "revoke"); changeForm(); }}
             className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm font-normal">
             <option value="exchange">換券（買錯券）</option>
             <option value="grant">直接發放體驗券</option>
+            <option value="revoke">手動收回體驗券</option>
           </select>
         </label>
         <label className="block text-sm font-semibold text-slate-700">
-          {action === "exchange" ? "要換成的正確體驗券" : "要發放的體驗券"}
+          {action === "exchange" ? "要換成的正確體驗券" : action === "revoke" ? "要收回的體驗券" : "要發放的體驗券"}
           <select value={offerId} onChange={(e) => { setOfferId(e.target.value as Offer); changeForm(); }}
             className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm font-normal">
             {OFFERS.map((offer) => <option key={offer.id} value={offer.id}>{offer.label}</option>)}
@@ -131,6 +132,8 @@ export default function AdminTrialVoucherManager({ students }: { students: Stude
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
         {action === "exchange"
           ? "確認後會作廢原本可用的體驗券，並發放正確券種。已使用、預約中或重複券不會被覆寫；操作不可直接復原。"
+          : action === "revoke"
+          ? "確認後會收回尚未使用、未綁定預約的體驗券並保留操作紀錄。已使用或已預約的券無法直接收回；不會自動退款或恢復重新領券資格。"
           : "確認後會新增一張體驗券。若學生曾持有該券種（包括已使用），系統會拒絕重複發放。"}
       </div>
       <button type="button" disabled={busy || completed || !userId || reason.trim().length < 2 || (action === "exchange" && offerId === previousOfferId)}
@@ -138,11 +141,13 @@ export default function AdminTrialVoucherManager({ students }: { students: Stude
           const selected = students.find((s) => s.id === userId);
           const description = action === "exchange"
             ? `作廢「${OFFERS.find((o) => o.id === previousOfferId)?.label}」並發放「${OFFERS.find((o) => o.id === offerId)?.label}」`
+            : action === "revoke"
+            ? `收回「${OFFERS.find((o) => o.id === offerId)?.label}」`
             : `發放「${OFFERS.find((o) => o.id === offerId)?.label}」`;
           if (window.confirm(`確認對「${selected?.name || selected?.email || userId}」${description}？\\n操作原因：${reason.trim()}`)) void submit();
         }}
         className="rounded-xl bg-sky-700 px-5 py-3 text-sm font-bold text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-300">
-        {busy ? "處理中……" : completed ? "已完成操作" : action === "exchange" ? "確認換券" : "確認發放體驗券"}
+        {busy ? "處理中……" : completed ? "已完成操作" : action === "exchange" ? "確認換券" : action === "revoke" ? "確認收回體驗券" : "確認發放體驗券"}
       </button>
       {feedback && <p role="status" className={`text-sm font-semibold ${completed ? "text-emerald-700" : "text-amber-800"}`}>{feedback}</p>}
     </div>
