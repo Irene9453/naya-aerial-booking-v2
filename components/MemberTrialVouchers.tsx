@@ -12,17 +12,21 @@ const TRIALS: { kind: TrialKind; offerId: string; label: string }[] = [
 ];
 
 /** Reads the same deterministic, owner-protected documents as TrialVoucherChoice. */
-export default function MemberTrialVouchers({ userId }: { userId: string }) {
+export default function MemberTrialVouchers({ userId, issuedOffers }: { userId: string; issuedOffers: { trial_yoga?: boolean; trial_aerial?: boolean } }) {
   const [states, setStates] = useState<Record<TrialKind, VoucherState>>({
     yoga: "loading",
     aerial: "loading",
   });
 
+  const yogaIssued = issuedOffers.trial_yoga === true;
+  const aerialIssued = issuedOffers.trial_aerial === true;
+
   useEffect(() => {
     if (!userId) return;
-    setStates({ yoga: "loading", aerial: "loading" });
+    // Missing documents cannot pass owner-only Firestore get rules. Only read issued offers.
+    setStates({ yoga: yogaIssued ? "loading" : "unavailable", aerial: aerialIssued ? "loading" : "unavailable" });
 
-    const unsubscribers = TRIALS.map(({ kind, offerId }) => {
+    const unsubscribers = TRIALS.filter(({ kind }) => kind === "yoga" ? yogaIssued : aerialIssued).map(({ kind, offerId }) => {
       const voucherId = `new_student_${userId}_${offerId}`;
       return onSnapshot(
         doc(db, "trialVouchers", voucherId),
@@ -43,7 +47,7 @@ export default function MemberTrialVouchers({ userId }: { userId: string }) {
     });
 
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [userId]);
+  }, [userId, yogaIssued, aerialIssued]);
 
   const loading = TRIALS.some(({ kind }) => states[kind] === "loading");
   const failed = TRIALS.some(({ kind }) => states[kind] === "error");
