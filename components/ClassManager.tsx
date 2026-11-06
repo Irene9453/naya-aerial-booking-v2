@@ -159,19 +159,28 @@ export default function ClassManager({
                 const end = classEndTime(classItem);
                 const ongoing = category === "upcoming" && start !== null && start <= now && end !== null && end > now;
                 const status = category === "cancelled" ? "已取消" : category === "past" ? "已結束" : ongoing ? "進行中" : classItem.status === "open" ? "開放中" : classItem.status;
-                return <article key={classItem.id} className="rounded-2xl border border-slate-200 bg-white p-5">
-                  <div className="flex flex-wrap items-center justify-between gap-5">
-                    <div><h4 className="text-lg font-bold text-slate-900">{classItem.courseName}</h4>
-                      <p className="mt-2 text-sm text-slate-700">{formatDateTime(classItem.startTime)}</p>
-                      {!classItem.endTime && start !== null && start <= now && category !== "cancelled" && <p className="mt-1 text-sm text-amber-800">未記錄結束時間，依開始時間分類</p>}
-                      <AdminEditClassLocation classId={classItem.id} location={classItem.location ?? ""} />
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3 text-sm">
-                      <span className="rounded-full bg-sky-50 px-4 py-2 font-semibold text-sky-800">{classItem.pointsRequired} 點</span>
-                      <span className="rounded-full bg-slate-100 px-4 py-2 font-semibold text-slate-700">{classItem.bookedCount} / {classItem.capacity} 人</span>
-                      <span className={`rounded-full px-4 py-2 font-semibold ${category === "cancelled" ? "bg-red-50 text-red-800" : category === "past" ? "bg-slate-100 text-slate-700" : "bg-emerald-50 text-emerald-800"}`}>{status}</span>
-                      <ClassPreparationAssistant classId={classItem.id} courseName={classItem.courseName} />
+                return <article key={classItem.id} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+                  <div className="min-w-0">
+                    <h4 className="break-words text-lg font-bold text-slate-900">{classItem.courseName}</h4>
+                    <p className="mt-2 text-sm text-slate-700">{formatDateTime(classItem.startTime)}</p>
+                    {!classItem.endTime && start !== null && start <= now && category !== "cancelled" && (
+                      <p className="mt-1 text-xs text-amber-800">未記錄結束時間，依開始時間分類</p>
+                    )}
+                    <AdminEditClassLocation classId={classItem.id} location={classItem.location ?? ""} />
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2 text-xs sm:text-sm" aria-label="課程狀態">
+                    <span className="rounded-full bg-sky-50 px-3 py-1.5 font-semibold text-sky-800">{classItem.pointsRequired} 點</span>
+                    <span className="rounded-full bg-slate-100 px-3 py-1.5 font-semibold text-slate-700">{classItem.bookedCount} / {classItem.capacity} 人</span>
+                    <span className={`rounded-full px-3 py-1.5 font-semibold ${category === "cancelled" ? "bg-red-50 text-red-800" : category === "past" ? "bg-slate-100 text-slate-700" : "bg-emerald-50 text-emerald-800"}`}>{status}</span>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-start sm:gap-3">
+                    <div className="min-w-0 [&>button]:w-full sm:[&>button]:w-auto">
                       <AdminClassRoster classId={classItem.id} courseName={classItem.courseName} />
+                    </div>
+                    <div className="min-w-0 [&>button]:w-full sm:[&>button]:w-auto">
+                      <ClassPreparationAssistant classId={classItem.id} courseName={classItem.courseName} />
+                    </div>
+                    <div className="col-span-2 min-w-0 sm:col-span-1 [&>div>button]:w-full sm:[&>div>button]:w-auto">
                       <AdminCancelWholeClass classId={classItem.id} courseName={classItem.courseName} startTimeMillis={start} status={classItem.status} />
                     </div>
                   </div>
