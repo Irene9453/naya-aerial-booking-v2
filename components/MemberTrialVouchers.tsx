@@ -1,0 +1,81 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { doc, onSnapshot } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+
+type TrialKind = "yoga" | "aerial";
+type VoucherState = "loading" | "available" | "unavailable" | "error";
+const TRIALS: { kind: TrialKind; offerId: string; label: string }[] = [
+  { kind: "yoga", offerId: "trial_yoga", label: "空瑜體驗券" },
+  { kind: "aerial", offerId: "trial_aerial", label: "舞綢／空環體驗券" },
+];
+
+/** Reads the same deterministic, owner-protected documents as TrialVoucherChoice. */
+export default function MemberTrialVouchers({ userId }: { userId: string }) {
+  const [states, setStates] = useState<Record<TrialKind, VoucherState>>({
+    yoga: "loading",
+    aerial: "loading",
+  });
+
+  useEffect(() => {
+    if (!userId) return;
+    setStates({ yoga: "loading", aerial: "loading" });
+
+    const unsubscribers = TRIALS.map(({ kind, offerId }) => {
+      const voucherId = `new_student_${userId}_${offerId}`;
+      return onSnapshot(
+        doc(db, "trialVouchers", voucherId),
+        (snapshot) => {
+          const data = snapshot.data();
+          const available =
+            snapshot.exists() &&
+            data?.userId === userId &&
+            data.offerId === offerId &&
+            data.kind === kind &&
+            data.status === "available" &&
+            data.quantity === 1 &&
+            data.bookingId == null;
+          setStates((old) => ({ ...old, [kind]: available ? "available" : "unavailable" }));
+        },
+        () => setStates((old) => ({ ...old, [kind]: "error" }))
+      );
+    });
+
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [userId]);
+
+  const loading = TRIALS.some(({ kind }) => states[kind] === "loading");
+  const failed = TRIALS.some(({ kind }) => states[kind] === "error");
+  const available = TRIALS.filter(({ kind }) => states[kind] === "available");
+
+  return (
+    <div className="mt-5 border-t border-sky-100 pt-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold text-slate-700">我的體驗券</p>
+        {!loading && !failed && (
+          <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
+            可使用 {available.length} 張
+          </span>
+        )}
+      </div>
+      {loading ? (
+        <p className="mt-2 text-sm text-slate-500">體驗券載入中……</p>
+      ) : failed ? (
+        <p role="alert" className="mt-2 text-sm text-amber-700">部分體驗券無法讀取，請重新整理後再試。</p>
+      ) : available.length === 0 ? (
+        <p className="mt-2 text-sm text-slate-500">目前沒有可使用的體驗券</p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {available.map(({ kind, label }) => (
+            <li key={kind} className="flex items-center justify-between rounded-xl border border-violet-100 bg-violet-50/60 px-3 py-2 text-sm">
+              <span className="font-medium text-slate-800">{label}</span>
+              <span className="font-semibold text-violet-700">1 張</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-2 text-xs leading-5 text-slate-500">體驗券可用於符合資格的課程，預約時選擇使用，不扣一般點數。</p>
+    </div>
+  );
+}
