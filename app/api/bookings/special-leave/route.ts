@@ -135,6 +135,12 @@ export async function POST(request: NextRequest) {
       .collection("specialLeaveRecords")
       .doc(`${userId}_${periodKey}`);
 
+    // Admin adjustments are independent of historical leave/refund records.
+    const adjustmentRef = adminDb.collection("specialLeaveQuotaAdjustments")
+      .doc(`${userId}_${periodKey}`);
+    const extraLeaveRef = adminDb.collection("specialLeaveRecords")
+      .doc(`${userId}_${periodKey}_extra_${bookingId}`);
+
     const refundRef = adminDb
       .collection("pointTransactions")
       .doc(`${bookingId}_special_leave_refund`);
@@ -157,9 +163,9 @@ export async function POST(request: NextRequest) {
         const voucherRef = isTrialVoucher ? adminDb.collection("trialVouchers").doc(trialVoucherId) : null;
         const voucherSnap = voucherRef ? await tx.get(voucherRef) : null;
         const classSnap = await tx.get(classRef);
-        const specialLeaveSnap = await tx.get(
-          specialLeaveRef
-        );
+        const [specialLeaveSnap, adjustmentSnap, extraLeaveSnap] = await Promise.all([
+          tx.get(specialLeaveRef), tx.get(adjustmentRef), tx.get(extraLeaveRef),
+        ]);
 
         if (!userSnap.exists) {
           throw new Error("找不到會員資料");
@@ -192,10 +198,16 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        if (
-          specialLeaveSnap.exists &&
-          specialLeaveSnap.data()?.status === "approved"
-        ) {
+        const baselineUsed = specialLeaveSnap.exists &&
+          specialLeaveSnap.data()?.status === "approved";
+        const adjustment = adjustmentSnap.data();
+        const manualBlocked = adjustment?.manualBlocked === true;
+        const extraRemaining = Number(adjustment?.extraRemaining ?? 0);
+        if (![0, 1].includes(extraRemaining)) {
+          throw new Error("特殊請假額度資料異常，請聯繫老師。");
+        }
+        const useExtra = baselineUsed && extraRemaining === 1 && !manualBlocked;
+        if (manualBlocked || (baselineUsed && !useExtra) || extraLeaveSnap.exists) {
           throw new Error(
             `你已使用 ${periodYear} 年${
               periodHalf === 1 ? "上半年" : "下半年"
@@ -312,7 +324,8 @@ export async function POST(request: NextRequest) {
         });
 
         // 半年一次的特殊請假紀錄
-        tx.set(specialLeaveRef, {
+        // Never overwrite the original approved leave/refund history.
+        tx.set(useExtra ? extraLeaveRef : specialLeaveRef, {
           userId,
           studentName,
           bookingId,
@@ -330,6 +343,13 @@ export async function POST(request: NextRequest) {
           usedAt: FieldValue.serverTimestamp(),
           createdAt: FieldValue.serverTimestamp(),
         });
+        if (useExtra) {
+          tx.update(adjustmentRef, {
+            extraRemaining: 0,
+            lastUsedBookingId: bookingId,
+            extraUsedAt: FieldValue.serverTimestamp(),
+          });
+        }
 
         // 退點交易
         tx.set(refundRef, {
@@ -429,6 +449,7 @@ export async function POST(request: NextRequest) {
       "課程預約人數資料異常",
       "此堂課目前預約人數為 3 人以下，無法使用特殊請假。",
       "預約點數資料不正確",
+      "特殊請假額度資料異常，請聯繫老師。",
       "體驗券預約資料不正確",
       "體驗券狀態不正確，無法退還",
     ];
