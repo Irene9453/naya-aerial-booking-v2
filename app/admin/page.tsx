@@ -367,7 +367,7 @@ allowMonthlyBooking: Boolean(
 {/* 里程碑獎勵管理 */}
 <AdminSection title="里程碑獎勵管理"><AdminMilestoneRewards /></AdminSection>
 
-<AdminSection title="特殊請假管理"><AdminSpecialLeaveManager /></AdminSection>
+<AdminSection title="特殊請假管理"><AdminSpecialLeaveManager students={students} /></AdminSection>
 <AdminSection title="動作資料庫"><MovementLibrary /></AdminSection>
 
 {/* 課卡管理 */}

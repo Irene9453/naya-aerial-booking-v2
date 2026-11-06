@@ -8,6 +8,7 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import AdminSpecialLeaveQuotaEditor from "@/components/AdminSpecialLeaveQuotaEditor";
 
 type SpecialLeaveRecord = {
   id: string;
@@ -54,7 +55,7 @@ function getPeriodLabel(
   }`;
 }
 
-export default function AdminSpecialLeaveManager() {
+export default function AdminSpecialLeaveManager({ students }: { students: Array<{ id: string; name: string; nickname?: string; email: string; role: string }> }) {
   const [records, setRecords] = useState<
     SpecialLeaveRecord[]
   >([]);
@@ -164,6 +165,8 @@ export default function AdminSpecialLeaveManager() {
           </p>
         </div>
       </div>
+
+      <div className="mt-6"><AdminSpecialLeaveQuotaEditor students={students} /></div>
 
       {message && (
         <p className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">
