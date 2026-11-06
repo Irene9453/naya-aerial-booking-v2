@@ -22,6 +22,7 @@ import AdminRevenueSummary from "@/components/AdminRevenueSummary";
 import AdminCouponManager from "@/components/AdminCouponManager";
 import AdminLegacyCouponAudit from "@/components/AdminLegacyCouponAudit";
 import AdminCouponGiftManager from "@/components/AdminCouponGiftManager";
+import AdminTrialVoucherManager from "@/components/AdminTrialVoucherManager";
 import AdminPurchaseRequests from "@/components/AdminPurchaseRequests";
 import AdminSpecialLeaveManager from "@/components/AdminSpecialLeaveManager";
 import MovementLibrary from "@/components/MovementLibrary";
@@ -362,6 +363,7 @@ allowMonthlyBooking: Boolean(
 {/* 舊會員移轉管理 */}
 <AdminSection title="舊會員移轉管理"><AdminLegacyMemberManager /></AdminSection>
 {/* 會員管理 */}
+<AdminSection title="體驗券發放／換券" description="會員誤購券種可安全換券，並保留操作紀錄"><AdminTrialVoucherManager students={students} /></AdminSection>
 <AdminSection title="會員與點數"><StudentManager students={students} /></AdminSection>
 
 {/* 里程碑獎勵管理 */}
