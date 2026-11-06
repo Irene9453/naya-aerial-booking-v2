@@ -35,6 +35,7 @@ type MemberData = {
   phone: string;
   experience: string;
   points: number;
+  newStudentOfferPurchases: { trial_yoga?: boolean; trial_aerial?: boolean };
   role: "student" | "admin";
    legacyStatus:
     | "eligible"
@@ -245,6 +246,10 @@ setMember({
   phone: String(data.phone ?? ""),
   experience: String(data.experience ?? ""),
   points: Number(data.points ?? 0),
+  newStudentOfferPurchases: {
+    trial_yoga: data.newStudentOfferPurchases?.trial_yoga === true,
+    trial_aerial: data.newStudentOfferPurchases?.trial_aerial === true,
+  },
   role: data.role === "admin" ? "admin" : "student",
 
   legacyStatus:
@@ -572,7 +577,7 @@ const historyBookings = bookings
             <p className="mt-3 text-5xl font-bold text-sky-600">
               {member.points}
             </p>
-            <MemberTrialVouchers userId={userId} />
+            <MemberTrialVouchers userId={userId} issuedOffers={member.newStudentOfferPurchases} />
 <div className="mt-6">
   <Link
     href="/buy-packages"
