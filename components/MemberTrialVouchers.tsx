@@ -51,24 +51,24 @@ export default function MemberTrialVouchers({ userId, issuedOffers }: { userId: 
 
   const loading = TRIALS.some(({ kind }) => states[kind] === "loading");
   const failed = TRIALS.some(({ kind }) => states[kind] === "error");
-  const available = TRIALS.filter(({ kind }) => states[kind] === "available");
+  const available = TRIALS.filter(({ kind }) => (kind === "yoga" ? yogaIssued : aerialIssued) && states[kind] === "available");
+
+  // Never reserve a permanent voucher area in the member card.
+  // Show the area only for usable vouchers, or a real read error that needs attention.
+  if ((!yogaIssued && !aerialIssued) || loading || (!failed && available.length === 0)) return null;
 
   return (
     <div className="mt-5 border-t border-sky-100 pt-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-slate-700">我的體驗券</p>
-        {!loading && !failed && (
+        {!failed && (
           <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
             可使用 {available.length} 張
           </span>
         )}
       </div>
-      {loading ? (
-        <p className="mt-2 text-sm text-slate-500">體驗券載入中……</p>
-      ) : failed ? (
+      {failed ? (
         <p role="alert" className="mt-2 text-sm text-amber-700">部分體驗券無法讀取，請重新整理後再試。</p>
-      ) : available.length === 0 ? (
-        <p className="mt-2 text-sm text-slate-500">目前沒有可使用的體驗券</p>
       ) : (
         <ul className="mt-3 space-y-2">
           {available.map(({ kind, label }) => (
