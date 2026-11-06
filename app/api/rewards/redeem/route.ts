@@ -126,17 +126,8 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const discountRate = Number(
-        couponData.discountRate ?? 1
-      );
-
-      if (
-        !Number.isFinite(discountRate) ||
-        discountRate <= 0 ||
-        discountRate > 1
-      ) {
-        throw new Error("優惠券折扣設定不正確");
-      }
+      // 折扣型態及金額統一由 couponTemplateFields 驗證，
+      // 不再只接受百分比折扣。
 
       const newRewardBalance =
         currentRewardPoints - rewardCost;
@@ -157,7 +148,6 @@ export async function POST(request: NextRequest) {
         ...validity,
         name: couponName,
         type: "reward",
-        discountRate,
         status: "available",
         rewardCost,
         issuedAt: FieldValue.serverTimestamp(),
