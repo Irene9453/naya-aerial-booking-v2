@@ -306,7 +306,15 @@ export async function POST(request: NextRequest) {
         if (voucherRef) {
           tx.update(voucherRef, { status: "available", quantity: 1, bookingId: null, usedAt: null, refundedAt: FieldValue.serverTimestamp() });
         } else {
-          tx.update(userRef, { points: newPointBalance });
+          tx.update(userRef, {
+            points: newPointBalance,
+            ...(useExtra ? { [`specialLeaveQuotaAdjustments.${periodKey}`]: { manualBlocked: false, extraRemaining: 0 } } : {}),
+          });
+        }
+        if (voucherRef && useExtra) {
+          tx.update(userRef, {
+            [`specialLeaveQuotaAdjustments.${periodKey}`]: { manualBlocked: false, extraRemaining: 0 },
+          });
         }
 
         // 釋出課程名額
