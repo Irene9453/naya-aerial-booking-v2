@@ -14,6 +14,7 @@ import {
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import { redeemCoupon } from "@/lib/redeemCouponService";
+import BirthdayCouponBenefit from "@/components/BirthdayCouponBenefit";
 
 import { couponValidityLabel, couponIsUsable, couponDeadline, templateValidityLabel, templateCanIssue } from "@/lib/couponValidity";
 import { couponDiscountLabel, couponDiscountFields } from "@/lib/couponDiscount";
@@ -388,9 +389,11 @@ export default function RewardsPage() {
             我的優惠券
           </h2>
 
+          {userId && <div className="mt-6"><BirthdayCouponBenefit userId={userId} /></div>}
+
           {userCoupons.length === 0 ? (
             <div className="mt-7 rounded-2xl bg-slate-50 px-5 py-8 text-center text-slate-600">
-              目前尚未持有優惠券。
+              目前沒有其他已領取的優惠券；生日優惠若符合資格會顯示於上方。
             </div>
           ) : (
             <div className="mt-7 grid gap-5 md:grid-cols-2">
