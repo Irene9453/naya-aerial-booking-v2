@@ -21,6 +21,7 @@ import ClassManager from "@/components/ClassManager";
 import AdminBookForStudent from "@/components/AdminBookForStudent";
 import AdminRevenueSummary from "@/components/AdminRevenueSummary";
 import AdminCouponManager from "@/components/AdminCouponManager";
+import AdminBirthdayBenefitNotify from "@/components/AdminBirthdayBenefitNotify";
 import AdminLegacyCouponAudit from "@/components/AdminLegacyCouponAudit";
 import AdminCouponGiftManager from "@/components/AdminCouponGiftManager";
 import AdminTrialVoucherManager from "@/components/AdminTrialVoucherManager";
@@ -379,6 +380,7 @@ allowMonthlyBooking: Boolean(
 
 {/* 優惠管理 */}
 <AdminSection title="優惠券管理"><AdminCouponManager /></AdminSection>
+      <AdminSection title="🎂 生日優惠通知" description="通知本月未使用生日 7 折的學生，一年只通知一次"><AdminBirthdayBenefitNotify /></AdminSection>
       <AdminSection title="優惠券期限管理"><AdminCouponValidityManager /></AdminSection>
       <AdminSection title="管理員贈券"><AdminCouponGiftManager /></AdminSection>
       <AdminSection title="舊會員優惠券核對"><AdminLegacyCouponAudit /></AdminSection>
