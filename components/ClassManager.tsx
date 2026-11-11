@@ -10,6 +10,7 @@ import { groupAdminClasses, classTime, classEndTime, type AdminClassCategory } f
 
 import AdminCreateClass from "@/components/AdminCreateClass";
 import AdminEditClassLocation from "@/components/AdminEditClassLocation";
+import AdminEditClassDetails from "@/components/AdminEditClassDetails";
 import AdminClassRoster from "@/components/AdminClassRoster";
 import AdminCancelWholeClass from "@/components/AdminCancelWholeClass";
 import ClassLessonContent from "@/components/ClassLessonContent";
@@ -167,6 +168,9 @@ export default function ClassManager({
                       <p className="mt-1 text-xs text-amber-800">未記錄結束時間，依開始時間分類</p>
                     )}
                     <AdminEditClassLocation classId={classItem.id} location={classItem.location ?? ""} />
+                    {category === "upcoming" && start !== null && start > now && classItem.status === "open" && (
+                      <AdminEditClassDetails classId={classItem.id} courseName={classItem.courseName} startTime={classItem.startTime} bookedCount={classItem.bookedCount} />
+                    )}
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2 text-xs sm:text-sm" aria-label="課程狀態">
                     <span className="rounded-full bg-sky-50 px-3 py-1.5 font-semibold text-sky-800">{classItem.pointsRequired} 點</span>
