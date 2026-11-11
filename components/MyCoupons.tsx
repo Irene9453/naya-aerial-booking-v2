@@ -14,7 +14,7 @@ export default function MyCoupons({ userId }: { userId: string }) {
       setItems(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }))); setError("");
     }, () => setError("優惠券讀取失敗，請稍後再試。"));
   }, [userId]);
-  return <details className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 text-slate-900"><summary className="cursor-pointer font-bold">我的優惠券（{items.length} 張）</summary>
+  return <details open className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 text-slate-900"><summary className="cursor-pointer font-bold">我的優惠券（{items.length} 張）</summary>
     {error && <p className="mt-3 text-red-700">{error}</p>}
     <div className="mt-4 space-y-3"><BirthdayCouponBenefit userId={userId} />{items.map(item => {
       const deadline = couponDeadline(item); const expired = deadline !== undefined && deadline !== null && deadline <= Date.now();
