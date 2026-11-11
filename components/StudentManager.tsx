@@ -106,6 +106,41 @@ export default function StudentManager({
       setCouponCountsLoaded(false);
     });
   }, []);
+  // Birthday discount is a virtual annual benefit, not a userCoupons document.
+  // Account for it using this year's authoritative birthdayCouponUsage records.
+  const taipeiNow = new Date();
+  const taipeiYear = Number(new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Taipei", year: "numeric",
+  }).format(taipeiNow));
+  const taipeiMonth = Number(new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Taipei", month: "numeric",
+  }).format(taipeiNow));
+  const [birthdayUsed, setBirthdayUsed] = useState<Record<string, boolean>>({});
+  const [birthdayUsageReady, setBirthdayUsageReady] = useState(false);
+  const [birthdayUsageError, setBirthdayUsageError] = useState(false);
+
+  useEffect(() => {
+    setBirthdayUsageReady(false);
+    return onSnapshot(collection(db, "birthdayCouponUsage"), snapshot => {
+      const statuses: Record<string, boolean> = {};
+      for (const item of snapshot.docs) {
+        if (!item.id.endsWith(`_${taipeiYear}`)) continue;
+        const uid = item.id.slice(0, -(`_${taipeiYear}`.length));
+        statuses[uid] = item.data().status !== "released";
+      }
+      setBirthdayUsed(statuses);
+      setBirthdayUsageReady(true);
+      setBirthdayUsageError(false);
+    }, error => {
+      console.error("讀取生日優惠使用狀態失敗", error);
+      setBirthdayUsageError(true);
+      setBirthdayUsageReady(false);
+    });
+  }, [taipeiYear]);
+  const hasAvailableBirthdayBenefit = (student: StudentData) =>
+    birthdayUsageReady && Number(student.birthdayMonth) === taipeiMonth &&
+    birthdayUsed[student.id] !== true;
+
   // NAYA_MEMBER_COUPON_COLUMN
   const [couponStudent, setCouponStudent] = useState<StudentData | null>(null);
   const [memberCoupons, setMemberCoupons] = useState<Record<string, unknown>[]>([]);
@@ -840,7 +875,7 @@ phone:
                       onClick={() => void openMemberCoupons(student)}
                       className="rounded-xl border border-pink-300 px-3 py-2 text-sm font-semibold text-pink-700 hover:bg-pink-50"
                     >
-                      {couponCountsError ? "張數讀取失敗" : !couponCountsLoaded ? "張數載入中…" : `可用 ${couponCounts[student.id] ?? 0} 張`}｜查看優惠券
+                      {couponCountsError ? "張數讀取失敗" : !couponCountsLoaded ? "張數載入中…" : birthdayUsageError ? "生日資格查詢失敗" : !birthdayUsageReady ? "生日資格載入中…" : `可用 ${(couponCounts[student.id] ?? 0) + (hasAvailableBirthdayBenefit(student) ? 1 : 0)} 張`}｜查看優惠券
                     </button>
                   </td>
 
@@ -1206,12 +1241,28 @@ phone:
             ) : (
               <>
                 <p className="mt-5 text-sm text-slate-600">
-                  共 {memberCoupons.length} 張優惠券
+                  共 {memberCoupons.length + (hasAvailableBirthdayBenefit(couponStudent) ? 1 : 0)} 張可查看優惠（含本月有效生日優惠）
                 </p>
 
+                {hasAvailableBirthdayBenefit(couponStudent) && (
+                  <div className="mt-4 rounded-xl border-2 border-rose-200 bg-rose-50 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-bold text-rose-800">🎂 生日 7 折優惠</p>
+                      <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-rose-700">本月可使用</span>
+                    </div>
+                    <p className="mt-2 text-sm text-rose-800">
+                      生日當月課卡 7 折，每年限用一次，有效至 {taipeiYear} 年 {taipeiMonth} 月最後一天。
+                    </p>
+                    <p className="mt-2 text-xs text-rose-700">
+                      系統自動提供的生日優惠，並非手動發放的優惠券；學生結帳時可直接選擇。
+                    </p>
+                  </div>
+                )}
+                {birthdayUsageError && <p className="mt-3 text-sm text-red-700">生日優惠使用狀態讀取失敗，暫無法確認。</p>}
+                {!birthdayUsageReady && !birthdayUsageError && <p className="mt-3 text-sm text-slate-600">生日優惠狀態讀取中……</p>}
                 {memberCoupons.length === 0 ? (
                   <p className="mt-3 rounded-xl bg-slate-50 p-5 text-center text-slate-500">
-                    此會員帳戶目前沒有已移轉的優惠券；舊會員匯入券請至「舊會員優惠券核對」確認。
+                    沒有其他已發放優惠券；本月生日優惠若符合資格會顯示於上方。
                   </p>
                 ) : (
                   <div className="mt-3 max-h-[55vh] space-y-3 overflow-y-auto">

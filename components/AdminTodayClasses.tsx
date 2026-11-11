@@ -56,7 +56,7 @@ export default function AdminTodayClasses({
 
   const todayClasses = classes
     .filter((classItem) => {
-      if (!classItem.startTime) {
+      if (!classItem.startTime || classItem.status === "cancelled" || classItem.status === "canceled" || classItem.status === "admin_cancelled") {
         return false;
       }
 
