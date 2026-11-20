@@ -301,12 +301,12 @@ export default function AdminCreateClass() {
     // Cancelled lessons remain in Firestore for audit/history, but must not
     // prevent re-creating the same time slot with a fresh class document.
     // Unknown/non-open statuses still block creation (fail closed).
-    const blocking = snapshot.docs.filter((item) =>
+    const blocking = (snapshot.docs ?? []).filter((item) =>
       !["cancelled", "canceled", "admin_cancelled"].includes(String(item.data().status ?? ""))
     );
     return {
       blocked: blocking.length > 0,
-      cancelled: snapshot.size - blocking.length,
+      cancelled: (snapshot.size ?? 0) - blocking.length,
       blockingIds: blocking.map((item) => item.id),
     };
   }
