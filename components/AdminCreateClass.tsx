@@ -13,6 +13,7 @@ import {
 import { auth, db } from "@/lib/firebase";
 
 import { oneHourLater, classScheduleDates, selectedClassName } from "@/lib/classScheduleDefaults";
+import { classifyMatchingClasses } from "@/lib/classDuplicateGuard";
 
 const courseOptions = [
   {
@@ -298,7 +299,10 @@ export default function AdminCreateClass() {
     const snapshot =
       await getDocs(existingQuery);
 
-    return !snapshot.empty;
+    return classifyMatchingClasses((snapshot.docs ?? []).map((item) => ({
+      id: item.id,
+      status: item.data().status,
+    })));
   }
 
   async function handleSubmit(
@@ -416,21 +420,24 @@ export default function AdminCreateClass() {
     try {
       let createdCount = 0;
       let skippedCount = 0;
+      let replacedCancelledCount = 0;
+      const blockingClassIds: string[] = [];
 
       for (
         const classDate of datesToCreate
       ) {
-        const exists =
-          await classAlreadyExists(
-            actualCourseName,
-            classDate,
-            startTime
-          );
+        const existing = await classAlreadyExists(
+          actualCourseName,
+          classDate,
+          startTime
+        );
 
-        if (exists) {
+        if (existing.blocked) {
           skippedCount += 1;
+          blockingClassIds.push(...existing.blockingIds);
           continue;
         }
+        if (existing.cancelled > 0) replacedCancelledCount += 1;
 
         const { startDate, endDate } = classScheduleDates(classDate, startTime, endTime, endNextDay);
 
@@ -494,10 +501,13 @@ export default function AdminCreateClass() {
         );
       } else {
         setMessage(
-          `沒有建立新課程，${skippedCount} 堂課程已經存在。`
+          `沒有建立新課程，${skippedCount} 堂課程已經存在。請檢查課程管理中的「未來課程」或「已取消課程」。${blockingClassIds.length ? ` 課程紀錄 ID：${blockingClassIds.join("、")}` : ""}`
         );
       }
 
+      if (replacedCancelledCount > 0) {
+        setMessage((old) => `${old}（其中 ${replacedCancelledCount} 堂原有取消紀錄，已另建可預約新課；舊紀錄保留。）`);
+      }
       if (createdCount > 0) {
         resetForm();
       }
