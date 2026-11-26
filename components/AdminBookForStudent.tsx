@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Timestamp } from "firebase/firestore";
 import { auth } from "@/lib/firebase";
 type Student = { id: string; name: string; nickname?: string; email: string; points: number; role: string };
@@ -26,6 +26,36 @@ export default function AdminBookForStudent({ students, classes }: { students: S
   const [busy, setBusy] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [message, setMessage] = useState("");
+  const [voucherBalances, setVoucherBalances] = useState<{ trialYoga: number; trialAerial: number } | null>(null);
+  const [voucherError, setVoucherError] = useState("");
+  const [voucherLoading, setVoucherLoading] = useState(false);
+  useEffect(() => {
+    let active = true;
+    setVoucherBalances(null);
+    setVoucherError("");
+    setVoucherLoading(Boolean(studentId));
+    if (!studentId) return () => { active = false; };
+    void (async () => {
+      try {
+        const user = auth.currentUser;
+        if (!user) throw Error("請重新登入管理員。");
+        const response = await fetch("/api/admin/trial-vouchers/balances", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${await user.getIdToken()}` },
+          body: JSON.stringify({ studentId }),
+          cache: "no-store",
+        });
+        const result = await response.json();
+        if (!response.ok) throw Error(result.error || "無法查詢體驗券。");
+        if (active) setVoucherBalances({ trialYoga: Number(result.trialYoga ?? 0), trialAerial: Number(result.trialAerial ?? 0) });
+      } catch (error) {
+        if (active) setVoucherError(error instanceof Error ? error.message : "查詢體驗券失敗。");
+      } finally {
+        if (active) setVoucherLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [studentId]);
   const selectedStudent = students.find(s => s.id === studentId);
   const selectedClass = classes.find(c => c.id === classId);
   const matches = useMemo(() => students.filter(s => s.role === "student" &&
@@ -44,13 +74,16 @@ export default function AdminBookForStudent({ students, classes }: { students: S
       : (a.startTime?.toMillis() ?? 0) - (b.startTime?.toMillis() ?? 0));
   }, [classes, period]);
   const offer = selectedClass ? getOffer(selectedClass.courseName) : null;
+  const voucherAvailable = offer === "trial_yoga"
+    ? (voucherBalances?.trialYoga ?? 0) > 0
+    : offer === "trial_aerial" ? (voucherBalances?.trialAerial ?? 0) > 0 : false;
   const paymentSummary = payment === "points"
     ? `${selectedClass?.pointsRequired ?? "—"} 點`
     : offer === "trial_yoga" ? "空瑜體驗券 1 張" : "舞綢／空環體驗券 1 張";
   function changed() { setCompleted(false); setMessage(""); }
 
   async function book() {
-    if (busy || completed || !selectedStudent || !selectedClass) return;
+    if (busy || completed || !selectedStudent || !selectedClass || (payment === "trial_voucher" && !voucherAvailable)) return;
     setBusy(true); setMessage("");
     try {
       const currentUser = auth.currentUser;
@@ -108,10 +141,13 @@ export default function AdminBookForStudent({ students, classes }: { students: S
         <select className="mt-2 w-full rounded-xl border border-slate-300 bg-white p-3 font-normal"
           value={payment} onChange={e => { setPayment(e.target.value as Payment); changed(); }}>
           <option value="points">使用學生點數</option>
-          <option value="trial_voucher" disabled={!offer}>使用符合課程的體驗券</option>
+          <option value="trial_voucher" disabled={!voucherAvailable || voucherLoading}>使用符合課程的體驗券（{offer === "trial_yoga" ? `空瑜剩餘 ${voucherBalances?.trialYoga ?? "?"} 張` : offer === "trial_aerial" ? `舞綢／空環剩餘 ${voucherBalances?.trialAerial ?? "?"} 張` : "此課程不適用"}）</option>
         </select>
       </label>
     </div>
+    {selectedStudent && <p className="text-xs text-slate-600">
+      學生可用體驗券：{voucherLoading ? "查詢中……" : voucherError || !voucherBalances ? voucherError || "無法確認" : `空瑜 ${voucherBalances.trialYoga} 張／舞綢・空環 ${voucherBalances.trialAerial} 張`}
+    </p>}
     {selectedClass && <p className="rounded-xl bg-sky-50 p-3 text-sm text-slate-700">
       {selectedClass.courseName}｜{format(selectedClass.startTime)}｜{selectedClass.location || "地點未指定"}
       <br />使用：{paymentSummary}{selectedStudent && payment === "points" ? `｜學生目前 ${selectedStudent.points} 點` : ""}
@@ -120,7 +156,7 @@ export default function AdminBookForStudent({ students, classes }: { students: S
       {period === "past" ? "補登已結束課程仍會立即扣除學生點數或體驗券，加入該堂課的預約紀錄；不會自動標記出席或發放出席紅利。" : "一般代約成功後會立即扣除所選學生的點數或體驗券並加入預約名單。"}
       已滿班、重複約課、餘額不足、券不可用或整堂已取消時，系統會拒絕操作。
     </p>
-    <button type="button" disabled={busy || completed || !selectedStudent || !selectedClass || (payment === "trial_voucher" && !offer)}
+    <button type="button" disabled={busy || completed || !selectedStudent || !selectedClass || (payment === "trial_voucher" && !voucherAvailable)}
       onClick={() => {
         if (!selectedStudent || !selectedClass) return;
         if (window.confirm(`確認替「${selectedStudent.name || selectedStudent.email}」${period === "past" ? "補登已結束課程" : "預約"}「${selectedClass.courseName}」？\\n時間：${format(selectedClass.startTime)}\\n扣款：${paymentSummary}${period === "past" ? "\\n將直接扣款但不會自動標記出席。" : ""}`)) void book();
