@@ -136,7 +136,9 @@ export default function RegisterPage() {
           email: email.trim().toLowerCase(),
           points: 0,
           rewardPoints: 0,
-          isNewStudent: false, // 僅管理員核對舊會員後可開啟
+          // 新生資格由後端在 Email 驗證後自動核對，前端不可自行授權。
+          registrationSource: memberType === "new" ? "native" : "legacy",
+          isNewStudent: false,
           newStudentEligibilityVerified: false,
           birthdayMonth: birth.birthdayMonth,
           birthdayDay: birth.birthdayDay,
@@ -258,8 +260,21 @@ export default function RegisterPage() {
         return;
       }
 
-      // 舊會員完成 Email 驗證後維持 pending，等待管理員核准。
-      // 不呼叫 auto-claim，以免只有手機與生日就能領走舊會員權益。
+      // 原生註冊的會員完成 Email 驗證後，立即由後端核對新生資格。
+      // 舊會員依然交由既有認領流程；絕不自動核准舊會員權益。
+      if (memberType === "new") {
+        try {
+          const token = await user.getIdToken(true);
+          const result = await fetch("/api/new-student-offers/eligibility", {
+            method: "POST", headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!result.ok) {
+            console.warn("新生資格待後續核對；課卡頁會再自動確認。", result.status);
+          }
+        } catch (eligibilityError) {
+          console.warn("註冊資格同步失敗，將由課卡頁重新檢查。", eligibilityError);
+        }
+      }
       router.replace(getSafeRedirectPath());
     } catch (error) {
       console.error("[Naya Email Verification] Error:", error);
