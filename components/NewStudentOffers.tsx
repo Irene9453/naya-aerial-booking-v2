@@ -21,7 +21,7 @@ const REASONS: Record<string, string> = {
   not_student: "此優惠僅供符合資格的學生會員使用。",
 };
 
-export default function NewStudentOffers({ registrationSource }: { registrationSource: "native" | "legacy" | null }) {
+export default function NewStudentOffers({ registrationSource = null }: { registrationSource?: "native" | "legacy" | null } = {}) {
   const checkedUid = useRef<string | null | undefined>(undefined);
   const requestVersion = useRef(0);
   const [eligibility, setEligibility] = useState<Eligibility | null>(null);
