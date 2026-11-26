@@ -129,7 +129,7 @@ test('eligibility returns pending items and releases rejected ones',async()=>{co
 test('legacy order without offerIds or claims still approves',async()=>{const f=fixture();await f.buy();const order=f.data.get('purchaseRequests/new_student_student_trial_yoga');delete order.offerIds;order.offerId='trial_yoga';f.data.delete('newStudentOfferClaims/new_student_student_trial_yoga');assert.equal((await f.finish()).status,200)});
 test('an error in one basket item prevents partial issuance',async()=>{const f=fixture();await basket(f,ids);f.data.set('trialVouchers/new_student_student_trial_aerial',{status:'used'});assert.equal((await approveBasket(f,ids)).status,400);assert.equal(f.data.get('users/student').points,0);assert.equal(f.data.has('trialVouchers/new_student_student_trial_yoga'),false);assert.equal(f.data.get('purchaseRequests/'+key(ids)).status,'pending')});
 
-function renderOffers(eligibility,selected=[]){
+function renderOffers(eligibility,selected=[],props={}){
  const React=require('react');const {renderToStaticMarkup}=require('react-dom/server');
  const state=[eligibility,'',false,false,selected,'12345'];let index=0;
  const js=ts.transpileModule(fs.readFileSync(path.join(root,'components/NewStudentOffers.tsx'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
@@ -143,7 +143,7 @@ function renderOffers(eligibility,selected=[]){
   if(id==='@/lib/newStudentOffers')return offerModule.exports;
   throw Error('Unknown module '+id);
  }});
- return renderToStaticMarkup(React.createElement(module.exports.default));
+ return renderToStaticMarkup(React.createElement(module.exports.default,props));
 }
 test('basket UI shows three selections and correct NT2030 combined total',()=>{
  const html=renderOffers({status:'eligible',purchasingEnabled:true},ids);
@@ -154,6 +154,25 @@ test('basket UI shows three selections and correct NT2030 combined total',()=>{
 });
 test('ineligible and checking members do not see offers',()=>{
  assert.equal(renderOffers({status:'ineligible'}),'');assert.equal(renderOffers(null),'');
+});
+test('saved verified native signup sees selectable offers before server refresh',()=>{
+ const html=renderOffers(null,[],{registrationSource:'native',nativeEligibilityVerified:true});
+ assert.match(html,/新生限定優惠/);
+ assert.match(html,/已取得新生資格/);
+ assert.equal((html.match(/type="checkbox"/g)||[]).length,3);
+ assert.doesNotMatch(html,/type="checkbox"[^>]*disabled=""/);
+ assert.doesNotMatch(html,/一次送出購買申請/); // Server still authorizes checkout.
+});
+test('unverified native and legacy signup cannot select offers during server refresh',()=>{
+ const pending=renderOffers(null,[],{registrationSource:'native',nativeEligibilityVerified:false});
+ assert.match(pending,/新生限定優惠/);
+ assert.equal((pending.match(/type="checkbox"[^>]*disabled=""/g)||[]).length,3);
+ const legacy=renderOffers(null,[],{registrationSource:'legacy',nativeEligibilityVerified:true});
+ assert.equal(legacy,'');
+});
+test('server ineligible result overrides previously saved native eligibility',()=>{
+ const html=renderOffers({status:'ineligible',reason:'regular_purchase'},[],{registrationSource:'native',nativeEligibilityVerified:true});
+ assert.equal(html,'');
 });
 test('pending or purchased offer checkbox is disabled',()=>{
  const html=renderOffers({status:'eligible',purchasingEnabled:true,unavailableOfferIds:['trial_yoga']});
