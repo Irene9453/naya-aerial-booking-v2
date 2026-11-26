@@ -224,3 +224,35 @@ test('mobile checkbox captures checked state before deferred render restores DOM
  const render=()=>{index=0;return module.exports.default()};let tree=render();const event={target:{checked:true}};nodes(tree)[0].props.onChange(event);event.target.checked=false;updates.splice(0).forEach(fn=>fn());tree=render();assert.equal(nodes(tree)[0].props.checked,true);assert.equal(state[4].length,1);
  const uncheck={target:{checked:false}};nodes(tree)[0].props.onChange(uncheck);uncheck.target.checked=true;updates.splice(0).forEach(fn=>fn());assert.equal(nodes(render())[0].props.checked,false);
 });
+
+test('native signup becomes eligible even before global legacy history completion',async()=>{
+ const f=fixture();f.env.NAYA_LEGACY_HISTORY_COMPLETE='false';
+ Object.assign(f.data.get('users/student'),{registrationSource:'native',isNewStudent:false,newStudentEligibilityVerified:false});
+ const refresh=await f.eligibility(f.request({},'student'));
+ assert.equal(refresh.status,200);
+ assert.equal((await refresh.json()).status,'eligible');
+ assert.equal(f.data.get('users/student').isNewStudent,true);
+ assert.equal((await f.buy()).status,200);
+});
+test('explicit legacy registration still waits for old-system verification',async()=>{
+ const f=fixture();f.env.NAYA_LEGACY_HISTORY_COMPLETE='false';
+ Object.assign(f.data.get('users/student'),{registrationSource:'legacy',isNewStudent:false,newStudentEligibilityVerified:false});
+ const refresh=await f.eligibility(f.request({},'student'));
+ assert.equal((await refresh.json()).status,'pending');
+ assert.equal((await f.buy()).status,400);
+});
+test('native signup does not override matching old-system member or previous purchase',async()=>{
+ const f=fixture();f.env.NAYA_LEGACY_HISTORY_COMPLETE='false';
+ f.data.get('users/student').registrationSource='native';
+ f.data.set('legacyMembers/older',{phoneNormalized:'0912345678',purchaseHistoryStatus:'purchased'});
+ assert.equal((await f.buy()).status,400);
+ f.data.delete('legacyMembers/older');
+ f.data.set('packageSales/earlier',{studentId:'student',offerType:'regular'});
+ assert.equal((await f.buy()).status,400);
+});
+test('native signup does not override mismatched mobile registry',async()=>{
+ const f=fixture();f.env.NAYA_LEGACY_HISTORY_COMPLETE='false';
+ f.data.get('users/student').registrationSource='native';
+ f.data.set('phoneRegistry/0912345678',{userId:'another'});
+ assert.equal((await f.buy()).status,400);
+});
