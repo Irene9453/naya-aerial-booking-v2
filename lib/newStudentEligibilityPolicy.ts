@@ -41,6 +41,12 @@ export function evaluateNewStudentEligibility(input: {
     return { status: "pending", reason: "legacy_purchase_history_pending" };
   }
   if (input.hasLegacyClaim && !input.legacyClaimApproved && legacyHistory !== "never_purchased") return { status: "pending", reason: "legacy_claim_review" };
+  // The signup-path is a hint for UX, not authorization: legacy matches,
+  // purchase history and phone identity were checked above and always win.
+  // Explicit legacy registrations continue to wait for the prior review flow.
+  if (u.registrationSource === "legacy" && !input.hasLegacyMatch && !input.hasLegacyClaim) {
+    return { status: "pending", reason: "legacy_claim_review" };
+  }
   // Old "legacy_member" denials were based only on account existence. Recheck them
   // after verified purchase history is available; never reset a consumed benefit.
   const legacyOnlyDenial = legacyHistory === "never_purchased" && ["legacy_member", "legacy_purchase"].includes(String(u.newStudentEligibilityReason));
@@ -50,6 +56,13 @@ export function evaluateNewStudentEligibility(input: {
   if (!normalizeEligibilityPhone(u.phoneNormalized ?? u.phone) || input.registryOwner !== input.userId) {
     return { status: "pending", reason: "phone_registry_mismatch" };
   }
-  if (!input.historyComplete) return { status: "pending", reason: "history_incomplete" };
+  // Native registrations do not depend on an unrelated global migration
+  // completion flag if the live phone + legacy lookup found no old member.
+  // Older accounts without provenance still retain the conservative check.
+  const safeNative = u.registrationSource === "native" &&
+    !input.hasLegacyMatch && !input.hasLegacyClaim && !hasLegacy;
+  if (!input.historyComplete && !safeNative) {
+    return { status: "pending", reason: "history_incomplete" };
+  }
   return { status: "eligible", reason: "no_course_purchase" };
 }
