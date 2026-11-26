@@ -21,7 +21,7 @@ const REASONS: Record<string, string> = {
   not_student: "此優惠僅供符合資格的學生會員使用。",
 };
 
-export default function NewStudentOffers({ registrationSource = null }: { registrationSource?: "native" | "legacy" | null } = {}) {
+export default function NewStudentOffers({ registrationSource = null, nativeEligibilityVerified = false }: { registrationSource?: "native" | "legacy" | null; nativeEligibilityVerified?: boolean } = {}) {
   const checkedUid = useRef<string | null | undefined>(undefined);
   const requestVersion = useRef(0);
   const [eligibility, setEligibility] = useState<Eligibility | null>(null);
@@ -96,9 +96,15 @@ export default function NewStudentOffers({ registrationSource = null }: { regist
   // A fresh native signup sees the offers as soon as their profile loads.
   // The purchase controls stay disabled until the server has checked
   // legacy matches, purchase history, identity and email verification.
-  const offerView = eligibility ?? (registrationSource === "native"
-    ? { status: "pending", reason: "native_initial_check" }
-    : null);
+  const savedNativeEligibility = registrationSource === "native" && nativeEligibilityVerified;
+  const offerView = eligibility ?? (savedNativeEligibility
+    ? { status: "eligible", reason: "saved_native_eligibility" }
+    : registrationSource === "native"
+      ? { status: "pending", reason: "native_initial_check" }
+      : null);
+  // Existing verified native users can select their offer immediately.
+  // Submission still waits for the fresh server check and purchase API enforces eligibility.
+  const canSelect = (savedNativeEligibility && !eligibility) || enabled;
   if (!offerView) return message ? <div role="status" className="mt-6 rounded-xl border border-amber-300 p-4 text-slate-800"><p>{message}</p><button type="button" disabled={checking} onClick={() => void checkEligibility()} className="mt-2 rounded-lg border px-3 py-2 font-semibold">重新確認資格</button></div> : null;
   if (offerView.status === "ineligible") return null;
 
@@ -108,8 +114,8 @@ export default function NewStudentOffers({ registrationSource = null }: { regist
       <h2 className="text-2xl font-bold text-slate-900">新生限定優惠</h2>
       <p className="mt-2 text-sm text-slate-600">每位符合資格的新生每項限購一次，不可合併其他優惠。請於上課前完成付款，老師確認收款後才會發放點數或體驗券。</p>
       <p className="mt-3 text-sm" role="status">
-        {checking ? "正在確認新生優惠資格……" : eligibility?.status === "eligible"
-          ? eligibility.purchasingEnabled ? "符合新生優惠資格。" : "符合新生優惠資格，購買功能尚未開放。"
+        {checking && !savedNativeEligibility ? "正在確認新生優惠資格……" : offerView.status === "eligible"
+          ? eligibility?.purchasingEnabled === false ? "符合新生優惠資格，購買功能尚未開放。" : savedNativeEligibility && !eligibility ? "已取得新生資格！可以先選擇優惠，系統同步確認可申購狀態。" : "符合新生優惠資格。"
           : offerView.reason === "native_initial_check" ? "歡迎加入！新生優惠已為你準備好，正在完成資格確認。"
           : REASONS[offerView.reason ?? ""] ?? "請登入後確認新生優惠資格。"} 
       </p>
@@ -138,8 +144,8 @@ export default function NewStudentOffers({ registrationSource = null }: { regist
             <p className="mt-3 text-sm text-slate-400 line-through">原價 NT$ {offer.regularPrice.toLocaleString()}</p>
             <p className="text-2xl font-bold text-sky-700">NT$ {offer.price.toLocaleString()}</p>
             <p className="mt-3 text-sm">{offer.points ? `${offer.points} 點` : "單堂體驗券 1 張"}</p>
-            <label className={`mt-5 flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-3 font-semibold ${unavailable || !enabled || checking || busy ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600" : selected.includes(id) ? "cursor-pointer border-sky-600 bg-sky-50 text-sky-900" : "cursor-pointer border-slate-300 text-slate-800"}`}>
-              <input type="checkbox" className="h-5 w-5 shrink-0 accent-sky-700" aria-label={offer.name} checked={selected.includes(id)} disabled={!enabled || checking || busy || unavailable}
+            <label className={`mt-5 flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-3 font-semibold ${unavailable || !canSelect || busy ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600" : selected.includes(id) ? "cursor-pointer border-sky-600 bg-sky-50 text-sky-900" : "cursor-pointer border-slate-300 text-slate-800"}`}>
+              <input type="checkbox" className="h-5 w-5 shrink-0 accent-sky-700" aria-label={offer.name} checked={selected.includes(id)} disabled={!canSelect || busy || unavailable}
                 onChange={event => {
                   const checked = event.target.checked;
                   setSelected(current => checked ? [...new Set([...current, id])] : current.filter(value => value !== id));
