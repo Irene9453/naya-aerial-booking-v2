@@ -21,7 +21,7 @@ const REASONS: Record<string, string> = {
   not_student: "此優惠僅供符合資格的學生會員使用。",
 };
 
-export default function NewStudentOffers() {
+export default function NewStudentOffers({ registrationSource }: { registrationSource: "native" | "legacy" | null }) {
   const checkedUid = useRef<string | null | undefined>(undefined);
   const requestVersion = useRef(0);
   const [eligibility, setEligibility] = useState<Eligibility | null>(null);
@@ -93,9 +93,14 @@ export default function NewStudentOffers() {
   }
 
   const enabled = eligibility?.status === "eligible" && eligibility.purchasingEnabled;
-  // Wait for the server decision so existing members never see the offer flash.
-  if (!eligibility) return message ? <div role="status" className="mt-6 rounded-xl border border-amber-300 p-4 text-slate-800"><p>{message}</p><button type="button" disabled={checking} onClick={() => void checkEligibility()} className="mt-2 rounded-lg border px-3 py-2 font-semibold">重新確認資格</button></div> : null;
-  if (eligibility.status === "ineligible") return null;
+  // A fresh native signup sees the offers as soon as their profile loads.
+  // The purchase controls stay disabled until the server has checked
+  // legacy matches, purchase history, identity and email verification.
+  const offerView = eligibility ?? (registrationSource === "native"
+    ? { status: "pending", reason: "native_initial_check" }
+    : null);
+  if (!offerView) return message ? <div role="status" className="mt-6 rounded-xl border border-amber-300 p-4 text-slate-800"><p>{message}</p><button type="button" disabled={checking} onClick={() => void checkEligibility()} className="mt-2 rounded-lg border px-3 py-2 font-semibold">重新確認資格</button></div> : null;
+  if (offerView.status === "ineligible") return null;
 
   const total = selected.reduce((sum, id) => sum + NEW_STUDENT_OFFERS[id].price, 0);
   return (
@@ -105,7 +110,8 @@ export default function NewStudentOffers() {
       <p className="mt-3 text-sm" role="status">
         {checking ? "正在確認新生優惠資格……" : eligibility?.status === "eligible"
           ? eligibility.purchasingEnabled ? "符合新生優惠資格。" : "符合新生優惠資格，購買功能尚未開放。"
-          : REASONS[eligibility?.reason ?? ""] ?? "請登入後確認新生優惠資格。"}
+          : offerView.reason === "native_initial_check" ? "歡迎加入！新生優惠已為你準備好，正在完成資格確認。"
+          : REASONS[offerView.reason ?? ""] ?? "請登入後確認新生優惠資格。"} 
       </p>
       <button type="button" disabled={checking || busy} onClick={() => void checkEligibility()}
         className="mt-3 rounded-xl border border-amber-300 px-4 py-2 disabled:opacity-50">重新確認資格</button>
@@ -126,7 +132,7 @@ export default function NewStudentOffers() {
       <div className="mt-6 grid gap-4 md:grid-cols-3">
         {(Object.keys(NEW_STUDENT_OFFERS) as NewStudentOfferId[]).map(id => {
           const offer = NEW_STUDENT_OFFERS[id];
-          const unavailable = eligibility.unavailableOfferIds?.includes(id) === true;
+          const unavailable = eligibility?.unavailableOfferIds?.includes(id) === true;
           return <article key={id} className="rounded-2xl border bg-white p-5">
             <h3 className="font-bold">{offer.name}</h3>
             <p className="mt-3 text-sm text-slate-400 line-through">原價 NT$ {offer.regularPrice.toLocaleString()}</p>
