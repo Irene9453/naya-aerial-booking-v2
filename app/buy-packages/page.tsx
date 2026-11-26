@@ -67,6 +67,7 @@ export default function BuyPackagesPage() {
 
   const [isNewStudent, setIsNewStudent] =
     useState(false);
+  const [registrationSource, setRegistrationSource] = useState<"native" | "legacy" | null>(null);
 
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -128,6 +129,7 @@ const [birthdayUsedThisYear, setBirthdayUsedThisYear] = useState(true);
             }
 
             const data = snapshot.data();
+            setRegistrationSource(data.registrationSource === "native" ? "native" : data.registrationSource === "legacy" ? "legacy" : null);
 
             setIsNewStudent(
               data.isNewStudent === true && data.newStudentEligibilityVerified === true
@@ -511,7 +513,7 @@ const hasBirthdayBenefit =
           </p>
         </div>
 
-        <NewStudentOffers />
+        <NewStudentOffers registrationSource={registrationSource} />
 
         {packages.length === 0 ? (
           <div className="mt-10 rounded-3xl bg-white px-6 py-12 text-center shadow-sm">
