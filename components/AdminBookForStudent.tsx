@@ -21,6 +21,7 @@ export default function AdminBookForStudent({ students, classes }: { students: S
   const [search, setSearch] = useState("");
   const [studentId, setStudentId] = useState("");
   const [classId, setClassId] = useState("");
+  const [period, setPeriod] = useState<"upcoming" | "past">("upcoming");
   const [payment, setPayment] = useState<Payment>("points");
   const [busy, setBusy] = useState(false);
   const [completed, setCompleted] = useState(false);
@@ -30,9 +31,18 @@ export default function AdminBookForStudent({ students, classes }: { students: S
   const matches = useMemo(() => students.filter(s => s.role === "student" &&
     (!search.trim() || [s.name, s.nickname, s.email, s.id].some(v =>
       String(v ?? "").toLowerCase().includes(search.trim().toLowerCase())))).slice(0, 40), [students, search]);
-  const available = useMemo(() => classes.filter(c => c.status === "open" &&
-    (c.startTime?.toMillis() ?? 0) > Date.now() && c.capacity > c.bookedCount &&
-    c.capacity > 0).sort((a,b) => (a.startTime?.toMillis() ?? 0) - (b.startTime?.toMillis() ?? 0)), [classes]);
+  // Past sessions are shown only to admins in this panel, never in student booking.
+  // Keep cancelled classes and courses without a valid start time excluded.
+  const available = useMemo(() => {
+    const now = Date.now();
+    return classes.filter(c => c.status === "open" &&
+      c.startTime && Number.isFinite(c.startTime.toMillis()) &&
+      (period === "past" ? c.startTime.toMillis() <= now : c.startTime.toMillis() > now) &&
+      c.capacity > c.bookedCount && c.capacity > 0
+    ).sort((a, b) => period === "past"
+      ? (b.startTime?.toMillis() ?? 0) - (a.startTime?.toMillis() ?? 0)
+      : (a.startTime?.toMillis() ?? 0) - (b.startTime?.toMillis() ?? 0));
+  }, [classes, period]);
   const offer = selectedClass ? getOffer(selectedClass.courseName) : null;
   const paymentSummary = payment === "points"
     ? `${selectedClass?.pointsRequired ?? "—"} 點`
@@ -57,14 +67,14 @@ export default function AdminBookForStudent({ students, classes }: { students: S
       const result = await response.json();
       if (!response.ok || result.success !== true) throw Error(result.error ?? "代約失敗");
       setCompleted(true);
-      setMessage(`已替 ${selectedStudent.name || selectedStudent.email} 預約成功。${payment === "points" ? `剩餘 ${result.remainingPoints} 點。` : "體驗券已使用。"}`);
+      setMessage(`已替 ${selectedStudent.name || selectedStudent.email} ${result.retroactive ? "補登已結束課程" : "預約"}成功。${payment === "points" ? `剩餘 ${result.remainingPoints} 點。` : "體驗券已使用。"}`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "預約失敗，請稍後重試。"); }
     finally { setBusy(false); }
   }
 
   return <div className="space-y-4 p-4 sm:p-5">
     <p className="text-sm leading-6 text-slate-600">
-      選擇學生及課程，由老師代為預約。系統會檢查剩餘名額、學生點數或體驗券及重複預約，並將預約登記在學生帳號。
+      選擇學生及課程，由老師代為預約或補登過去的課程。系統會檢查剩餘名額、學生點數或體驗券及重複預約，並將紀錄登記在學生帳號。
     </p>
     <div className="grid gap-4 md:grid-cols-2">
       <label className="block text-sm font-semibold text-slate-700">搜尋學生
@@ -78,6 +88,13 @@ export default function AdminBookForStudent({ students, classes }: { students: S
           {studentId && !matches.some(s => s.id === studentId) &&
             <option value={studentId}>{selectedStudent?.name || selectedStudent?.email || studentId}</option>}
           {matches.map(s => <option key={s.id} value={s.id}>{s.name || s.nickname || "未命名"} · {s.email || s.id}（{s.points} 點）</option>)}
+        </select>
+      </label>
+      <label className="block text-sm font-semibold text-slate-700">課程時間範圍
+        <select className="mt-2 w-full rounded-xl border border-slate-300 bg-white p-3 font-normal"
+          value={period} onChange={e => { setPeriod(e.target.value as "upcoming" | "past"); setClassId(""); changed(); }}>
+          <option value="upcoming">尚未開始的課程（一般代約）</option>
+          <option value="past">已開始／已結束的課程（補登）</option>
         </select>
       </label>
       <label className="block text-sm font-semibold text-slate-700">選擇課程
@@ -100,15 +117,16 @@ export default function AdminBookForStudent({ students, classes }: { students: S
       <br />使用：{paymentSummary}{selectedStudent && payment === "points" ? `｜學生目前 ${selectedStudent.points} 點` : ""}
     </p>}
     <p className="text-xs leading-5 text-amber-800">
-      代約成功後將直接扣除所選學生的點數或體驗券並加入預約名單；若已滿班、重複約課、餘額不足或券不可用，系統會拒絕操作。
+      {period === "past" ? "補登已結束課程仍會立即扣除學生點數或體驗券，加入該堂課的預約紀錄；不會自動標記出席或發放出席紅利。" : "一般代約成功後會立即扣除所選學生的點數或體驗券並加入預約名單。"}
+      已滿班、重複約課、餘額不足、券不可用或整堂已取消時，系統會拒絕操作。
     </p>
     <button type="button" disabled={busy || completed || !selectedStudent || !selectedClass || (payment === "trial_voucher" && !offer)}
       onClick={() => {
         if (!selectedStudent || !selectedClass) return;
-        if (window.confirm(`確認替「${selectedStudent.name || selectedStudent.email}」預約「${selectedClass.courseName}」？\\n時間：${format(selectedClass.startTime)}\\n扣款：${paymentSummary}`)) void book();
+        if (window.confirm(`確認替「${selectedStudent.name || selectedStudent.email}」${period === "past" ? "補登已結束課程" : "預約"}「${selectedClass.courseName}」？\\n時間：${format(selectedClass.startTime)}\\n扣款：${paymentSummary}${period === "past" ? "\\n將直接扣款但不會自動標記出席。" : ""}`)) void book();
       }}
       className="rounded-xl bg-sky-700 px-5 py-3 font-semibold text-white disabled:bg-slate-300">
-      {busy ? "處理中……" : completed ? "預約完成" : "確認替學生預約"}
+      {busy ? "處理中……" : completed ? "完成" : period === "past" ? "確認補登過去課程" : "確認替學生預約"}
     </button>
     {message && <p role="status" className="text-sm font-semibold text-slate-700">{message}</p>}
   </div>;
