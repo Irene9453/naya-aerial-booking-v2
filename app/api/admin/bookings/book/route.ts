@@ -86,7 +86,9 @@ export async function POST(request: NextRequest) {
       if (!Number.isSafeInteger(required) || required <= 0) throw Error("課程點數設定不正確。");
       if (!Number.isSafeInteger(balance) || balance < 0) throw Error("會員點數資料異常。");
       if (!(course.startTime instanceof Timestamp)) throw Error("課程時間設定不正確。");
-      if (course.startTime.toMillis() <= Date.now()) throw Error("此課程已開始，無法預約。");
+      // Only the authenticated administrator endpoint may backfill a past class.
+      // Student booking retains its own future-only restriction.
+      const retroactive = course.startTime.toMillis() <= Date.now();
       let remainingPoints = balance;
       let offerId: string | null = null;
       if (voucherRef && voucherId) {
@@ -115,7 +117,9 @@ export async function POST(request: NextRequest) {
         pointsUsed: method === "points" ? required : 0,
         status: "booked", createdAt: FieldValue.serverTimestamp(),
         cancelledAt: null, pointsRefunded: 0,
-        bookedByAdminId: adminId, bookingSource: "admin_on_behalf",
+        bookedByAdminId: adminId,
+        bookingSource: retroactive ? "admin_retroactive" : "admin_on_behalf",
+        retroactive,
       });
       if (waitlist.exists && waitlist.data()?.status === "waiting") {
         tx.update(waitlistRef, { status: "converted", convertedAt: FieldValue.serverTimestamp() });
@@ -125,17 +129,20 @@ export async function POST(request: NextRequest) {
           userId: uid, bookingId, classId: cid, courseName: String(course.courseName ?? ""),
           classStartTime: course.startTime, type: "booking",
           amount: -required, balanceAfter: remainingPoints,
-          createdAt: FieldValue.serverTimestamp(), adminId,
+          createdAt: FieldValue.serverTimestamp(), adminId, retroactive,
         });
       }
       tx.create(adminDb.collection("notifications").doc(), {
-        userId: uid, type: "booking", title: "老師已替你預約課程",
-        body: `老師已替你預約 ${String(course.courseName ?? "")}`,
+        userId: uid, type: retroactive ? "booking_retroactive" : "booking",
+        title: retroactive ? "老師已補登過去的課程" : "老師已替你預約課程",
+        body: retroactive
+          ? `老師已替你補登過去的課程 ${String(course.courseName ?? "")}，並扣除對應的點數或體驗券。`
+          : `老師已替你預約 ${String(course.courseName ?? "")}`,
         classId: cid, bookingId, courseName: String(course.courseName ?? ""),
         classStartTime: course.startTime, isRead: false,
         createdAt: FieldValue.serverTimestamp(),
       });
-      return { bookingId, studentId: uid, remainingPoints, paymentType: method };
+      return { bookingId, studentId: uid, remainingPoints, paymentType: method, retroactive };
     });
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
